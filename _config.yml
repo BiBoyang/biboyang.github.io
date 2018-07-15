@@ -1,35 +1,35 @@
 # Basic
-title: 潘柏信
-subtitle: 个人站
+title: Balaenuceps-Rex
+subtitle: 个人博客
 description: 欢迎来到我的个人站~
 # 头像里面的标题
-avatarTitle: leopardpan
+avatarTitle: 笔记窝
 # 头像里面的描述
-avatarDesc: iOS / 机器学习
-url: "http://baixin.io"
+avatarDesc: iOS / FE
+url: "http://biboyang.github.io"
 
 # Comment
 comment:
-    disqus: leopard
+    # disqus: leopard
     # uyan: 2143225  # 有言id,登录有言官网申请
 
 # Social
 social:
-    weibo: 5366874726 
-    github: leopardpan
+    weibo: 3802042356 
+    github: BiBoyang
     # twitter: 
-    mail: leopardpan@icloud.com
+    mail: biboyang622@gmail.com
 
 # 百度统计 
 # 使用博客模板请去掉或者更换 id 
-baidu:
-    id: 8ba1c6be0953b6f9c2ba38e57f615421  
+# baidu:
+    # id: 8ba1c6be0953b6f9c2ba38e57f615421  
 
 # Google Analytics
 # 使用博客模板请去掉或者更换 id
-ga:
-    id: UA-84134159-3   
-    host: auto  
+# ga:
+    # id: UA-84134159-3   
+    # host: auto  
 
 
 # 《----------------- 上面的信息修改成你自己的 ---------------------------》
