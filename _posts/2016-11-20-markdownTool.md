@@ -166,7 +166,7 @@ objc_msgSend会依据接收者与选择子的类型来调用适当的方法。�
 有时需要在对象中存放相关信息，这是我们通常对从对象所属的类中继承一个子类，然后改用这个子类对象。然而有时候我们无法这么做，这时候就要使用关联对象了。
 
 |关联类型      | 等效的@property属性 |     
-| --------   | -----  | 
+| --------   | -----  |   
 | OBJC_ASSOCIATION_ASSIGN     | assign |  
 | OBJC_ASSOCIATION_RETAIN_NONATOMIC        |  nonatomic,retain   |   
 | OBJC_ASSOCIATION_COPY_NONATOMIC        |   nonatomic,copy    |  
