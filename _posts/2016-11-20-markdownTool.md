@@ -2,7 +2,6 @@
 layout: post  
 title: runtime扯扯扯  
 date: 2017-11-20  
-tags: iOS
 tags: runtime    
 
 ---
@@ -19,7 +18,7 @@ Runtime 又叫运行时，是一套底层的，由C语言和汇编实现的API�
 * Runtime的方法替换
 
 ## Runtime的类和对象
-####Class 和 id
+#### Class 和 id
 Objective-C（为了方便，下面用OC代替）的类是由`Class`来表示的，实际上是一个objc_class的指针,而对象，则是`objc_object`:
 ```
 struct objc_class {
@@ -173,6 +172,7 @@ objc_msgSend会依据接收者与选择子的类型来调用适当的方法。�
 | OBJC_ASSOCIATION_COPY_NONATOMIC        |   nonatomic,copy    |  
 | OBJC_ASSOCIATION_RETAIN        |    retain    |  
 | OBJC_ASSOCIATION_COPY        |    copy    |  
+
 下列方法可以管理关联对象：
 >* void objc_setAssociatedObject(id object,void *key,id value,objc_AssociationPolicy policy)
 此方法以给定的键和策略为某对象设置关联对象值
