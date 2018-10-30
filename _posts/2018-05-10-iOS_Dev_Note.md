@@ -11,10 +11,10 @@ tags: iOS
 话不多说，直接上正题：
 # 倒计时的种类
 在开发过程中，我们基本上只用了这几种方式来实现倒计时
-> 1.PerformSelecter
-> 2.NSTimer 
-> 3.CADisplayLink
-> 4.GCD 
+> 1.PerformSelecter     
+> 2.NSTimer         
+> 3.CADisplayLink   
+> 4.GCD     
 
 ### PerformSelecter
 我们使用下面的代码可以实现指定延迟之后执行：
@@ -243,8 +243,7 @@ __darwin_suseconds_t    tv_usec;        /* and microseconds */
 答案是也有可能！
 这里我们看一张图
 ![](http://upload-images.jianshu.io/upload_images/1342490-ace7a143db37d7d0.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-这张图来自[Concurrent Programming: APIs and Challenges
-](https://www.objc.io/issues/2-concurrency/concurrency-apis-and-pitfalls/),大家有时间可以看一下。
+这张图来自[Concurrent Programming: APIs and Challenges](https://www.objc.io/issues/2-concurrency/concurrency-apis-and-pitfalls/),大家有时间可以看一下。
 在GCD的线程池中，总大小目前来看应该是66，有关倒计时的优先级是默认default的。
 假如存在很多的High的任务，或者66个线程都卡住了（这个其实不太可能），GCD的倒计时也是会受到一定影响的。而且它本身可能也会受到线程分配的影响，创建过多线程也是要耗费一定资源的。
 
@@ -351,7 +350,8 @@ gettimeofday和sysctl都会受系统时间影响，但他们二者做一个减�
 
 
 #### 感谢：
-[深入理解RunLoop](https://blog.ibireme.com/2015/05/18/runloop/)
+[深入理解RunLoop](https://blog.ibireme.com/2015/05/18/runloop/)  
 [从NSTimer的失效性谈起（二）：关于GCD Timer和libdispatch](https://yq.aliyun.com/users/1333828036923774)
-[iOS关于时间的处理](http://mrpeak.cn/blog/ios-time/)
-[Linux 应用层的时间编程](https://www.ibm.com/developerworks/cn/linux/1307_liuming_linuxtime1/)
+    [iOS关于时间的处理](http://mrpeak.cn/blog/ios-time/)
+   [Linux 应用层的时间编程](https://www.ibm.com/developerworks/cn/linux/1307_liuming_linuxtime1/)
+   

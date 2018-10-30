@@ -157,9 +157,8 @@ xxx
 ![](http://upload-images.jianshu.io/upload_images/1342490-f6cd704688cccb1d?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
 横轴为遍历的对象数目,纵轴为耗时,单位us.
 从图中看出，在对象数目很小的时候，各种方式的性能差别微乎其微。随着对象数目的增大， 性能差异才体现出来.
-其中for in的耗时一直都是最低的，当对象数高达100万的时候，for in耗时也没有超过5ms.
-其次是for循环耗时较低.
-反而，直觉上应该非常快速的多线程遍历方式却是性能最差的。
+其中for in的耗时一直都是最低的，当对象数高达100万的时候，for in耗时也没有超过5ms.  
+其次是for循环耗时较低，反而，直觉上应该非常快速的多线程遍历方式却是性能最差的。   
 我们来看一下内部结构：
 **1\. __NSArrayI**
 __NSArrayI的结构定义为:
@@ -174,9 +173,9 @@ id _list[0];
 
 ```
 
-`_used`是数组的元素个数,调用`[array count]`时，返回的就是`_used`的值。
-这里我们可以把`id _list[0]`当作`id *_list`来用，即一个存储`id`对象的`buff`.
-由于`__NSArrayI`的不可变,所以`_list`一旦分配，释放之前都不会再有移动删除操作了，只有获取对象一种操作.因此`__NSArrayI`的实现并不复杂.
+`_used`是数组的元素个数,调用`[array count]`时，返回的就是`_used`的值。  
+这里我们可以把`id _list[0]`当作`id *_list`来用，即一个存储`id`对象的`buff`. 
+由于`__NSArrayI`的不可变,所以`_list`一旦分配，释放之前都不会再有移动删除操作了，只有获取对象一种操作.因此`__NSArrayI`的实现并不复杂. 
 **2\. __NSSingleObjectArrayI**
 __NSSingleObjectArrayI的结构定义为:
 
@@ -207,12 +206,12 @@ id *_list;
 
 ```
 
-`__NSArrayM`稍微复杂一些，但是同样的，它的内部对象数组也是一块连续内存`id* _list`，正如`__NSArrayI`的`id _list[0]`一样
-`_used`:当前对象数目
-`_offset`:实际对象数组的起始偏移,这个字段的用处稍后会讨论
-`_size`:已分配的`_list`大小(能存储的对象个数，不是字节数)
-`_mutations`：修改标记，每次对`__NSArrayM`的修改操作都会使`_mutations`加1
-`id *_list`是个循环数组.并且在增删操作时会动态地重新分配以符合当前的存储需求.
+`__NSArrayM`稍微复杂一些，但是同样的，它的内部对象数组也是一块连续内存`id* _list`，正如`__NSArrayI`的`id _list[0]`一样 
+`_used`:当前对象数目  
+`_offset`:实际对象数组的起始偏移,这个字段的用处稍后会讨论  
+`_size`:已分配的`_list`大小(能存储的对象个数，不是字节数)   
+`_mutations`：修改标记，每次对`__NSArrayM`的修改操作都会使`_mutations`加1 
+`id *_list`是个循环数组.并且在增删操作时会动态地重新分配以符合当前的存储需求.   
 
 我们在上面说过，**__NSArrayM** 用了[环形缓冲区 (circular buffer)](https://link.jianshu.com/?t=http%3A%2F%2Fen.wikipedia.org%2Fwiki%2FCircular_buffer)。
 并且在增删操作时会动态地重新分配以符合当前的存储需求.以一个初始包含5个对象,总大小`_size`为6的`_list`为例:
@@ -263,9 +262,9 @@ B,C往后移动了，E的空缺被填补
 objects:(id *)stackbuffer 
 count:(NSUInteger)len;
 ```
-它直接从C数组中取对象。对于可变数组来说，它最多只需要两次就可以获取全部全速。如果数组还没有构成循环，那么第一次就获得了全部元素，跟不可变数组一样。但是如果数组构成了循环，那么就需要两次，第一次获取对象数组的起始偏移到循环数组末端的元素,第二次获取存放在循环数组起始处的剩余元素。
+它直接从C数组中取对象。对于可变数组来说，它最多只需要两次就可以获取全部全速。如果数组还没有构成循环，那么第一次就获得了全部元素，跟不可变数组一样。但是如果数组构成了循环，那么就需要两次，第一次获取对象数组的起始偏移到循环数组末端的元素,第二次获取存放在循环数组起始处的剩余元素。    
 而for循环之所以慢一点，是因为for循环的时候每次都要调用`objectAtIndex:`
-假如我们遍历的时候不需要获取当前遍历操作所针对的下标，我们就可以选择forin。
+假如我们遍历的时候不需要获取当前遍历操作所针对的下标，我们就可以选择forin。    
 ####2.block循环
 这种循环虽然是最慢的，但是我们在遍历的时候可以直接从block中获取更多的信息，并且可以修改块的方法签名，以免进行类型转换操作。
 ```
@@ -279,11 +278,11 @@ NSDictionary *aDictionary = /*...*/;
 }];
 
 ```
-并且如果需要需要并发的时候，也可以方便的使用dispatch group。
+并且如果需要需要并发的时候，也可以方便的使用dispatch group。   
 另外还有一点：如果数组的数量过多，除了block遍历，其他的遍历方法都需要添加autoreleasePool方法来优化。block不需要，因为系统在实现它的时候就已经实现了相关处理。
 
 ## 参考文献
-[Effective Objective-C 2.0:编写高质量iOS与OS X代码的52个有效方法](https://detail.tmall.com/item.htm?spm=a230r.1.14.6.6f3c5210AspBot&id=560781916540&cm_id=140105335569ed55e27b&abbucket=14)
-[NSMutableArray Class Reference](https://link.jianshu.com?t=https%3A%2F%2Fdeveloper.apple.com%2Flibrary%2Fios%2Fdocumentation%2FCocoa%2FReference%2FFoundation%2FClasses%2FNSMutableArray_Class%2FReference%2FReference.html)
-[CFArray 的历史渊源及实现原理](https://www.desgard.com/CFArray/)
-[Objective-C 数组遍历的性能及原理](https://www.jianshu.com/p/66f8410c6bbc)
+[Effective Objective-C 2.0:编写高质量iOS与OS X代码的52个有效方法](https://detail.tmall.com/item.htm?spm=a230r.1.14.6.6f3c5210AspBot&id=560781916540&cm_id=140105335569ed55e27b&abbucket=14)   
+[NSMutableArray Class Reference](https://link.jianshu.com?t=https%3A%2F%2Fdeveloper.apple.com%2Flibrary%2Fios%2Fdocumentation%2FCocoa%2FReference%2FFoundation%2FClasses%2FNSMutableArray_Class%2FReference%2FReference.html)   
+[CFArray 的历史渊源及实现原理](https://www.desgard.com/CFArray/)  
+[Objective-C 数组遍历的性能及原理](https://www.jianshu.com/p/66f8410c6bbc)    
