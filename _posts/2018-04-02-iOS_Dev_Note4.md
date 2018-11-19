@@ -2,7 +2,7 @@
 layout: post
 title: iOS性能优化之路
 date: 2018-4-02 
-tags: iOS、APM
+tags: iOS
 ---
 
 我在开发iOS的过程中，逐渐形成了一些对iOS性能优化的认识，准备总结出来。恳请各位斧正。

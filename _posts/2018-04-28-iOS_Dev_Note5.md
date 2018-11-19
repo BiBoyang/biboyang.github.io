@@ -2,7 +2,7 @@
 layout: post
 title: iOS启动时间优化
 date: 2018-4-28 
-tags: iOS、APM
+tags: iOS
 ---
 # 启动时间
 应用启动流程
