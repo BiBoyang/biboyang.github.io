@@ -1,6 +1,6 @@
 ---
 layout: post
-title: @property的研究（一）：来源
+title: property的研究（一）：来源
 date: 2018-07-06  
 tags: iOS
 ---

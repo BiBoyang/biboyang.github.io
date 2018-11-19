@@ -1,6 +1,6 @@
 ---
 layout: post
-title: @property的研究（二）：weak关键字
+title: property的研究（二）：weak关键字
 date: 2018-07-28 
 tags: iOS
 ---
