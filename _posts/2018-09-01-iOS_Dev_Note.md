@@ -1,7 +1,7 @@
 ---
 layout: post
 title: 类簇的官方翻译
-date: 2018-9-01 
+date: 2018-09-01 
 tags: iOS
 ---
 # 类簇 在官方文档中的解释

@@ -1,7 +1,7 @@
 ---
 layout: post
 title: block笔记（三）：内存泄漏
-date: 2018-5-10 
+date: 2018-06-19 
 tags: iOS
 ---
 > 在不特殊说明是MRC的情况下，默认是ARC。

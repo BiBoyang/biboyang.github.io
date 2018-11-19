@@ -1,7 +1,7 @@
 ---
 layout: post
 title: iOS电量优化小Tip（下）
-date: 2018-4-24 
+date: 2018-04-24 
 tag: iOS
 ---
 ## 电量测量

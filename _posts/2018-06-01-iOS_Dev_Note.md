@@ -1,7 +1,7 @@
 ---
 layout: post
 title: block笔记（一）：block的本质
-date: 2018-6-01
+date: 2018-06-01
 tags: iOS
 ---
 ## 简单概述
