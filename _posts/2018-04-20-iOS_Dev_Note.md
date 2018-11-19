@@ -1,288 +1,389 @@
 ---
 layout: post
-title: 关于NSArray的二三事
-date: 2018-4-10 
+title: iOS电量优化小Tip（上）
+date: 2018-4-20 
 tag: iOS
 ---
 
-在iOS开发中，我们在非常非常多的地方用到了数组。而关于数组，有很多需要注意和优化的细节，需要我们潜入到下面，去了解。
-以下，是我长时间工作学习中积攒下来的碎片，积攒了足够多了，就应该拿出来亮一亮了。
-#### 读书读出来的问题
-前段日子我为了学习英语，阅读《Effective Objective-C 2.0》的原版的时候，我发现了之前没怎么注意到的一段话：
-> In the case of NSArray, when an instance is allocated, it’s an instance of another class that’s allocated (during a call to alloc), known as a placeholder array. This placeholder array is then converted to an instance of another class, which is a concrete subclass of NSArray.
-在使用了NSArray的alloc方法来获取实例时，该方法首先会分类一个属于某类的实例，此实例充当“占位数组”。该数组稍后会转为另一个类的实例，而那个类则是NSArray的实体子类。
+在现如今的开发中, 电量消耗是一个应用运行效果的一个重要的衡量标准,尤其是直播，运动应用。 设备中的每个硬件模块都会消耗电量。电量的最大消费者是CPU,但这只是系统的一个方面。一个编写良好的应用需要谨慎地使用电能。用户往往会删除耗电量大的应用。
+除CPU外，耗电量高、值得关注的硬件模块还包括网络硬件、蓝牙、GPS、麦克风、加速计、摄像头、扬声器和屏幕。
+如何降低电量的消耗，是延长使用时间的关键。我们要关注以下：
+*   判断电池的剩余电量及充电状态
+*   如何分析电源
+*   如何在 iOS 应用中分析电源, CPU 和资源的使用
 
-话不多说，代码写两行：
-```
-NSArray *placeholder = [NSArray alloc];
-NSArray *arr1 = [[NSArray alloc] init];
-NSArray *arr2 = [[NSArray alloc] initWithObjects:@0, nil];
-NSArray *arr3 = [[NSArray alloc] initWithObjects:@0, @1, nil];
-NSArray *arr4 = [[NSArray alloc] initWithObjects:@0, @1, @2, nil];
+#### 1. CPU
 
-NSLog(@"placeholder: %s", object_getClassName(placeholder));
-NSLog(@"arr1: %s", object_getClassName(arr1));
-NSLog(@"arr2: %s", object_getClassName(arr2));
-NSLog(@"arr3: %s", object_getClassName(arr3));
-NSLog(@"arr4: %s", object_getClassName(arr4));
+不论用户是否正在直接使用, CPU 都是应用所使用的主要硬件, 在后台操作和处理推送通知时, 应用仍然会消耗 CPU 资源。
+![image](http://upload-images.jianshu.io/upload_images/1342490-897b0a8719b4b348.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
 
-NSMutableArray *mPlaceholder = [NSMutableArray alloc];
-NSMutableArray *mArr1 = [[NSMutableArray alloc] init];
-NSMutableArray *mArr2 = [[NSMutableArray alloc] initWithObjects:@0, nil];
-NSMutableArray *mArr3 = [[NSMutableArray alloc] initWithObjects:@0, @1, nil];
+应用计算的越多,消耗的电量越多.在完成相同的基本操作时, 老一代的设备会消耗更多的电量(换电池呀 哈哈哈 开个玩笑),计算量的消耗取决于不同的因素。
+*   对数据的处理
+*   待处理的数据大小----更大的显示屏允许软件在单个视图中展示更多的信息,但这也意味着要处理更多的数据
+*   处理数据的算法和数据结构
+*   执行更新的次数,尤其是在数据更新后,触发应用的状态或 UI 进行更新(应用收到的推送通知也会导致数据更新,如果此用户正在使用应用,你还需要更新 UI)
 
-NSLog(@"mPlaceholder: %s", object_getClassName(mPlaceholder));    
-NSLog(@"mArr1: %s", object_getClassName(mArr1));
-NSLog(@"mArr2: %s", object_getClassName(mArr2));
-NSLog(@"mArr3: %s", object_getClassName(mArr3));
-```
-打印出来的结果是这样的:
-```
-2018-02-25 09:09:15.628381+0800 NSArrayTest[44716:5228210] placeholder: __NSPlaceholderArray
-2018-02-25 09:09:15.628749+0800 NSArrayTest[44716:5228210] arr1: __NSArray0
-2018-02-25 09:09:15.629535+0800 NSArrayTest[44716:5228210] arr2: __NSSingleObjectArrayI
-2018-02-25 09:09:15.630635+0800 NSArrayTest[44716:5228210] arr3: __NSArrayI
-2018-02-25 09:09:15.630789+0800 NSArrayTest[44716:5228210] arr4: __NSArrayI
-2018-02-25 09:09:15.630993+0800 NSArrayTest[44716:5228210] mPlaceholder: __NSPlaceholderArray
-2018-02-25 09:09:15.631095+0800 NSArrayTest[44716:5228210] mArr1: __NSArrayM
-2018-02-25 09:09:15.631954+0800 NSArrayTest[44716:5228210] mArr2: __NSArrayM
-2018-02-25 09:09:15.632702+0800 NSArrayTest[44716:5228210] mArr3: __NSArrayM
-```
-清晰易懂，我们可以看到，不管创建的事可变还是不可变的数组，在alloc之后得到的类都是**__NSPlaceholderArray**。而当我们init一个不可变的空数组之后，得到的是**__NSArray0**；如果有且只有一个元素，那就是**__NSSingleObjectArrayI**；有多个元素的，叫做 **__NSArrayI**；init出来一个可变数组的话，都是 **__NSArrayM**。
+没有单一原则可以减少设备中的执行次数,很多规则都取决于操作的本质, 以下是一些可以在应用中投入使用的最佳实践.
+
+*   针对不同的情况选择优化的算法 
+*   如果应用从服务器接受数据,尽量减少需要在客户端进行的处理 
+*   优化静态编译(ahead-of-time,AOT)处理 
+动态编译处理的缺点在于他会强制用户等待操作完成, 但是激进的 AOT 处理则会导致计算资源的浪费, 需要根据应用和设备选择精确定量的 AOT 处理. 
+
+### 2. 网络
+
+智能的网络访问管理可以让应用响应的更快,并有助于延长电池寿命.在无法访问网络时,应该推迟后续的网络请求, 直到网络连接恢复为止。
+此外,应避免在没有连接 WiFi 的情况下进行高宽带消耗的操作.比如视频流, 众所周知, 蜂窝无线系统(LTE,4G,3G等)对电量的消耗远远大于 WiFi信号, 根源在于 LTE 设备基于多输入,多输出技术,使用多个并发信号以维护两端的 LTE 链接,类似的,所有的蜂窝数据链接都会定期扫描以寻找更强的信号. 因此,我们需要:
+
+*   在进行任何网络操作之前,先检查合适的网络连接是否可用
+*   持续监视网络的可用性,并在链接状态发生变化时给与适当的反馈
+
+>*官方提供了检查和监听网络状态的变化的代码，大多数人使用的网络库----AFNetWorking也提供了类似的代码，我们可以任选其一，亦或是自己编写（这段代码并不复杂）*
 
 
-![](https://upload-images.jianshu.io/upload_images/1342490-270c017a4b4a3579.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-我们看到__NSPlaceholderArray的名字就知道它是用来占位的。
-那它是什么呢？我们继续写几行代码：
-```
-NSArray *placeholder1 = [NSArray alloc];
-NSArray *placeholder2 = [NSArray alloc];
-NSLog(@"placeholder1: %p", placeholder1);
-NSLog(@"placeholder2: %p", placeholder2);
-```
-打印出来的结果很有意思
-```
-2018-02-25 09:41:45.097431+0800 NSArrayTest[45228:5277101] placeholder1: 0x604000005d90
-2018-02-25 09:41:45.097713+0800 NSArrayTest[45228:5277101] placeholder2: 0x604000005d90
-```
-这两个内存地址是一样的，我们可以猜测，这里是生成了一个单例，在执行init之后就被新的实例给更换掉了。**该类内部只有一个isa指针**，除此之外没有别的东西。
-由于苹果没有公开此处的源码，我查阅了别的类似的开源以及资料，得到如下的结论：
-> 1、当元素为空时，返回的是__NSArray0的单例；
-2、当元素仅有一个时，返回的是__NSSingleObjectArrayI的实例；
-3、当元素大于一个的时候，返回的是__NSArrayI的实例。
-4、网上的资料，大多未提及__NSSingleObjectArrayI，可能是后面新增的，理由大概还是为了效率，在此不深究。
+### 3.  定位管理器和 GPS
+定位服务包括GPS（或GLONASS）和WIFI硬件以及蜂窝网络
+>原文中只写了前两种，而我们知道iOS的定位是有三种的
+>* 卫星定位
+>* 蜂窝基站定位
+>* Wi-Fi定位（WIFI定位的故事和缘由很有的一讲，在后面会说）
 
-为了区别可变和不可变的情况，在init的时候，会根据是NSArray还是NSMutableArray来创建immutablePlaceholder和mutablePlaceholder，它们都是__NSPlaceholderArray类型的。
-#### 创建数组
-在上面的多种创建数组的方法里，都是最后调用了initWithObjects:count:函数。
-```
-@interface NSArray<__covariant ObjectType> : NSObject <NSCopying, NSMutableCopying, NSSecureCoding, NSFastEnumeration>
+我们都知道定位服务是很耗电的,使用 GPS 计算坐标需要确定两点信息:
 
-@property (readonly) NSUInteger count;
-- (ObjectType)objectAtIndex:(NSUInteger)index;
-- (instancetype)init NS_DESIGNATED_INITIALIZER;
-- (instancetype)initWithObjects:(const ObjectType _Nonnull [_Nullable])objects count:(NSUInteger)cnt NS_DESIGNATED_INITIALIZER;
-- (nullable instancetype)initWithCoder:(NSCoder *)aDecoder NS_DESIGNATED_INITIALIZER;
+*   时间锁 每个 GPS 卫星每毫秒广播唯一一个1023位随机数, 因而数据传播速率是1.024Mbit/s GPS 的接收芯片必须正确的与卫星的时间锁槽对齐
+*   频率锁 GPS 接收器必须计算由接收器与卫星的相对运动导致的多普勒偏移带来的信号误差
 
-@end
-```
-这就是类族的优点，在创建某个类族的子类的时候，我们不需要实现所有的功能。在CoreFoundation的类蔟的抽象工厂基类（如NSArray、NSString、NSNumber等）中，Primitive methods指的就是这些核心的方法，也就是那些在创建子类时必须要重写的方法，通常在类的interface中声明，在文档中一般也会说明。其他可选实现的方法在Category中声明。同时还需要注意其整个继承树的祖先的Primitive methods也都需要实现。
-####CFArray和NSMutableArray
-CFArray是CoreFoundation中的，和Foundation中的NSArray相对应，他们是**Toll-Free Bridged**的。通过阅读 [ibireme](https://blog.ibireme.com/2014/02/17/cfarray/)的这篇博客，我们可以知道，CFArray最开始是使用双端队列实现的，但是因为性能问题，后来发生了改变，因为没有开源代码，ibireme只能通过测试来猜测它可能换成[圆形缓冲区](https://en.wikipedia.org/wiki/Circular_buffer)来实现了（但是现在可以确定还是双端队列）。
-任何典型的程序员都知道 C 数组的原理。可以归结为一段能被方便读写的连续内存空间。数组和指针并不相同 (详见 [Expert C Programming](https://link.jianshu.com?t=http%3A%2F%2Fwww.amazon.com%2FExpert-Programming-Peter-van-Linden%2Fdp%2F0131774298) 或 [这篇文章](https://link.jianshu.com?t=http%3A%2F%2Feli.thegreenplace.net%2F2009%2F10%2F21%2Fare-pointers-and-arrays-equivalent-in-c%2F))，不能说：一块被 **malloc** 过的内存空间等同于一个数组 (一种被滥用了的说法)。
+**计算坐标会不断的使用 CPU 和 GPS 的硬件资源,因此他们会迅速的消耗电池电量**
 
-使用一段线性内存空间的一个最明显的缺点是，在下标 0 处插入一个元素时，需要移动其它所有的元素，即 **memmove** 的原理：
-![](https://upload-images.jianshu.io/upload_images/6260113-3a498cb87008f05c.jpg?imageMogr2/auto-orient/strip%7CimageView2/2/w/700)
-同样地，假如想要保持相同的内存指针作为首个元素的地址，移除第一个元素需要进行相同的动作：
-[](https://link.jianshu.com/?t=http%3A%2F%2Fblog.joyingx.me%2Fimages%2F20150503%2F2.jpg)
-![](http://upload-images.jianshu.io/upload_images/1342490-5f4bd5189d2515f9?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-当数组非常大时，这样很快会成为问题。显而易见，直接指针存取在数组的世界里必定不是最高级的抽象。C 风格的数组通常很有用，但 Obj-C 程序员每天的主要工作使得它们需要 NSMutableArray 这样一个可变的、可索引的容器。
-这里，我们需要阅读[这篇博客](http://ciechanowski.me/blog/2014/03/05/exposing-nsmutablearray/)。在这里我们可以确定使用了环形缓冲区。
-正如你会猜测的，**__NSArrayM** 用了[环形缓冲区 (circular buffer)](https://link.jianshu.com?t=http%3A%2F%2Fen.wikipedia.org%2Fwiki%2FCircular_buffer)。这个数据结构相当简单，只是比常规数组或缓冲区复杂点。环形缓冲区的内容能在到达任意一端时绕向另一端。
-
-环形缓冲区有一些非常酷的属性。尤其是，除非缓冲区满了，否则在任意一端插入或删除均不会要求移动任何内存。我们来分析这个类如何充分利用环形缓冲区来使得自身比 C 数组强大得多。
-我们在这里知道了几个有趣的东西：
-**在删除的时候不会清除指针。**
-最有意思的一点，如果我们在中间进行插入或者删除，只会移动最少的一边的元素。
-
-![](https://upload-images.jianshu.io/upload_images/1342490-fd825000c47dd36a.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-![](http://upload-images.jianshu.io/upload_images/1342490-1a27f1fd852e2c30?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-####NSMutableArray的方法
-正如 [NSMutableArray Class Reference](https://link.jianshu.com?t=https%3A%2F%2Fdeveloper.apple.com%2Flibrary%2Fios%2Fdocumentation%2FCocoa%2FReference%2FFoundation%2FClasses%2FNSMutableArray_Class%2FReference%2FReference.html) 的讨论，每个 **NSMutableArray** 子类必须实现下面 7 个方法：
-
-*   **- count**
-*   **- objectAtIndex:**
-*   **- insertObject:atIndex:**
-*   **- removeObjectAtIndex:**
-*   **- addObject:**
-*   **- removeLastObject**
-*   **- replaceObjectAtIndex:withObject:**
-
-毫不意外的是，**__NSArrayM** 履行了这个规定。然而，**__NSArrayM** 的所有实现方法列表相当短且不包含 21 个额外的在 **NSMutableArray** 头文件列出来的方法。谁负责执行这些方法呢？
-
-这证明它们只是 **NSMutableArray** 类自身的一部分。这会相当的方便：任何 **NSMutableArray** 的子类只须实现 7 个最基本的方法。所有其它高等级的抽象建立在它们的基础之上。例如 **- removeAllObjects** 方法简单地往回迭代，一个个地调用 **- removeObjectAtIndex:**。
-##遍历数组的n个方法
-#### 1.for 循环
-```
-for (int i = 0;  i < array.count; ++i) {
-id object = array[i];
-}
-```
-
-#### 2.NSEnumerator
-```
-NSArray *anArray = /*...*/;
-NSEnumerator *enumerator = [anArray objectEnumerator];
-id object;
-while((object = [enumerator nextObject])!= nil){
-
-}
-```
-#### 3.forin
-快速遍历
-```
-NSArray *anArray = /*...*/;
-for (id object in anArray) {
-
-}
-```
-#### 4.enumerateObjectsWithOptions:usingBlock:
-通过block回调，在子线程中遍历，对象的回调次序是乱序的,而且调用线程会等待该遍历过程完成:
-```
-[array enumerateObjectsWithOptions:NSEnumerationConcurrent usingBlock:^(id  _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
-xxx
-}];
-```
-性能比较如图
-![](http://upload-images.jianshu.io/upload_images/1342490-f6cd704688cccb1d?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-横轴为遍历的对象数目,纵轴为耗时,单位us.
-从图中看出，在对象数目很小的时候，各种方式的性能差别微乎其微。随着对象数目的增大， 性能差异才体现出来.
-其中for in的耗时一直都是最低的，当对象数高达100万的时候，for in耗时也没有超过5ms.  
-其次是for循环耗时较低，反而，直觉上应该非常快速的多线程遍历方式却是性能最差的。   
-我们来看一下内部结构：
-**1\. __NSArrayI**
-__NSArrayI的结构定义为:
+ 先来看一下初始化`CLLocationManager`并高效接受地理位置更新的典型代码
 
 ```
-@interface __NSArrayI : NSArray
-{
-NSUInteger _used;
-id _list[0];
-}
+.h文件
+@interface LLLocationViewController :UIViewController<CLLocationManagerDelegate>
+@property (nonatomic, strong)CLLocationManager *manager;
 @end
 
-```
+.m文件
+@implementation LLLocationViewController
 
-`_used`是数组的元素个数,调用`[array count]`时，返回的就是`_used`的值。  
-这里我们可以把`id _list[0]`当作`id *_list`来用，即一个存储`id`对象的`buff`. 
-由于`__NSArrayI`的不可变,所以`_list`一旦分配，释放之前都不会再有移动删除操作了，只有获取对象一种操作.因此`__NSArrayI`的实现并不复杂. 
-**2\. __NSSingleObjectArrayI**
-__NSSingleObjectArrayI的结构定义为:
-
-```
-@interface __NSSingleObjectArrayI : NSArray
-{
-id object;
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.manager = [[CLLocationManager alloc]init];
+    self.manager.delegate = self;    
 }
+
+- (void)enableLocationButtonClick:(UIButton *)sender{
+
+    self.manager.distanceFilter = kCLDistanceFilterNone;
+    // 按照最大精度初始化管理器
+    self.manager.desiredAccuracy = kCLLocationAccuracyBest;
+
+    if (IS_IOS8) {
+        [self.manager requestWhenInUseAuthorization];
+    }
+    [self.manager startUpdatingLocation];
+}
+
+- (void)locationManager:(CLLocationManager *)manager
+     didUpdateLocations:(NSArray<CLLocation *> *)locations{
+
+    CLLocation *loc = [locations lastObject];
+    // 使用定位信息
+}
+
+```
+
+##### 3.1 最佳的初始化
+
+*   **distanceFilter** 
+只要设备的移动超过了最小的距离, 距离过滤器就会导致管理器对委托对象的 `LocationManager:didUpdateLocations:`事件通知发生变化,该距离单位是 M
+*   **desiredAccuracy** 
+精度参数的使用直接影响了使用天线的个数, 进而影响了对电池的消耗.精度级别的选取取决于应用的具体用途,精度是一个枚举 我们应该依照不同的需求去恰当的选取精度级别
+
+**距离过滤器只是软件层面的过滤器,而精度级别会影响物理天线的使用.当委托方法 `LocationManager:didUpdateLocations:`被调用时,使用距离范围更广泛的过渡器只会影响间隔.另一方面,更高的精度级别意味着更多的活动天线,这会消耗更多的能量**
+
+##### 3.2 关闭无关紧要的特性
+
+判断何时需要跟踪位置的变化, 在需要跟踪的时候调用 `startUpdatingLocation`方法, 无须跟踪时调用`stopUpdatingLocation`方法.
+
+当应用在后台运行或用户没有与别人聊天时,也应该关闭位置跟踪,也就说说,浏览媒体库,查看朋友列表或调整应用设置时, 都应该关闭位置跟踪
+
+##### 3.3 只在必要时使用网络
+为了提高电量的使用效率, IOS 总是尽可能地保持无线网络关闭.当应用需要建立网络连接时, IOS 会利用这个机会向后台应用分享网络会话, 以便一些低优先级能够被处理, 如推送通知, 收取电子邮件等。
+关键在于每当用户建立网络连接时,网络硬件都会在连接完成后多维持几秒的活动时间.每次集中的网络通信都会消耗大量的电量 。
+要想减轻这个问题带来的危害,你的软件需要有所保留的的使用网络.应该定期集中短暂的使用网络,而不是持续的保持着活动的数据流.只有这样,网络硬件才有机会关闭
+
+##### 3.4 后台定位服务
+> 这里iOS 10 之后变化比较大，参考即可
+
+`CLLocationManager`提供了一个替代的方法来监听位置的更新. `[self.manager startMonitoringSignificantLocationChanges]`可以帮助你在更远的距离跟踪运动.精确的值由内部决定,且与`distanceFilter`无关 使用这一模式可以在应用进入后台后继续跟踪运动,典型的做法是在应用进入后台时执行`startMonitoringSignificantLocationChanges`方法,而当应用回到前台时执行`startUpdatingLocation` 如下代码
+
+```
+- (void)applicationDidEnterBackground:(UIApplication *)application {
+    [self.manager stopUpdatingLocation];
+    [self.manager startMonitoringSignificantLocationChanges];
+}
+- (void)applicationWillEnterForeground:(UIApplication *)application {    
+    [self.manager stopMonitoringSignificantLocationChanges];
+    [self.manager startUpdatingLocation];    
+}
+
+```
+##### 3.5 在应用关闭后重启
+当应用位于后台时，任何定时器或线程都会挂起。但如果你在应用位于后台状态时申请了定位，那么应用会在每次收到更新后被短暂的唤醒。在此期间，线程和计时器都会被唤醒。
+
+##### 3.6 在应用关闭后重启
+
+在其他应用需要更多资源时, 后台的应用可能会被关闭.在这种情况下, 一旦发生位置变化,应用会被重启,因而需要重新初始化监听过程,若出现这种情况,`application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions`方法会受到键值为`UIApplicationLaunchOptionsLocationKey`的条目 如下代码: 在应用关闭后重新初始化监听
+
+```
+- (void)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+    // 因缺乏资源而关闭应用后, 监测应用是否因为位置变化而被重启
+    if (launchOptions[UIApplicationLaunchOptionsLocationKey]) {
+// 开启监测位置的变化
+        [self.manager startMonitoringSignificantLocationChanges];
+    }
+}
+
+```
+
+###4 屏幕 
+屏幕非常耗电, 屏幕越大就越耗电.当然,如果你的应用在前台运行且与用户进行交互,则势必会使用屏幕并消耗电量 这里仍然有一些方案可以优化屏幕的使用
+
+##### 4.1 动画
+
+当应用在前台时, 使用动画, 一旦应用进入了后台,则立即暂停动画.通常来说,你可以通过监听 `UIApplicationWillResignActiveNotification`或`UIApplicationDIdEnterBackgroundNotification`的通知事件来暂停或停止动画,也可以通过监听`UIApplicationDidBecomeActiveNotification`的通知事件来恢复动画
+
+##### 4.2 视频播放
+
+
+在视频播放期间,最好保持屏幕常量.可以使用`UIApplication`对象的 `idleTimerDisabled`属性来实现这个目的.一旦设置了 YES, 他会阻止屏幕休眠,从而实现常亮. 与动画类似,你可以通过相应应用的通知来释放和获取锁
+
+##### 4.3 多屏幕
+
+使用屏幕比休眠锁或暂停/恢复动画要复杂得多
+
+如果正在播放电影或运行动画, 你可以将它们从设备的屏幕挪到外部屏幕,而只在设备的屏幕上保留最基本的设置,这样可以减少设备上的屏幕更新,进而延长电池寿命
+
+处理这一场景的典型代码会涉及一下步骤
+
+*   1 在启动期间监测屏幕的数量 如果屏幕数量大于1,则进行切换
+*   2 监听屏幕在链接和断开时的通知. 如果有新的屏幕加入, 则进行切换. 如果所有的外部屏幕都被移除,则恢复到默认显示
+
+```
+
+@interface LLMultiScreenViewController ()
+@property (nonatomic, strong)UIWindow  *secondWindow;
 @end
 
-```
+@implementation LLMultiScreenViewController
 
-因为只有在"创建只包含一个对象的不可变数组"时,才会得到`__NSSingleObjectArrayI`对象，所以其内部结构更加简单，一个`object`足矣.
-**3\. __NSArrayM**
-__NSArrayM的结构定义为:
-
-```
-@interface __NSArrayM : NSMutableArray
-{
-NSUInteger _used;
-NSUInteger _offset;
-int _size:28;
-int _unused:4;
-uint32_t _mutations;
-id *_list;
+- (void)viewDidAppear:(BOOL)animated{
+    [super viewDidAppear:animated];
+    [self updateScreens];
 }
-@end
 
-```
+- (void)viewDidDisappear:(BOOL)animated{
+    [super viewDidDisappear:animated];
+    [self disconnectFromScreen];
 
-`__NSArrayM`稍微复杂一些，但是同样的，它的内部对象数组也是一块连续内存`id* _list`，正如`__NSArrayI`的`id _list[0]`一样 
-`_used`:当前对象数目  
-`_offset`:实际对象数组的起始偏移,这个字段的用处稍后会讨论  
-`_size`:已分配的`_list`大小(能存储的对象个数，不是字节数)   
-`_mutations`：修改标记，每次对`__NSArrayM`的修改操作都会使`_mutations`加1 
-`id *_list`是个循环数组.并且在增删操作时会动态地重新分配以符合当前的存储需求.   
-
-我们在上面说过，**__NSArrayM** 用了[环形缓冲区 (circular buffer)](https://link.jianshu.com/?t=http%3A%2F%2Fen.wikipedia.org%2Fwiki%2FCircular_buffer)。
-并且在增删操作时会动态地重新分配以符合当前的存储需求.以一个初始包含5个对象,总大小`_size`为6的`_list`为例:
-`_offset = 0`,`_used = 5`,`_size=6`
-
-![image](http://upload-images.jianshu.io/upload_images/1342490-b858da3a89a12afd?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-在末端追加3个对象后:
-`_offset = 0`,`_used = 8`,`_size=8`
-`_list`已重新分配
-
-![image](http://upload-images.jianshu.io/upload_images/1342490-a55870d6fe2e7985?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-删除对象A:
-`_offset = 1`,`_used = 7`,`_size=8`
-
-![image](http://upload-images.jianshu.io/upload_images/1342490-bbf9d5188c694b41?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-删除对象E:
-`_offset = 2`,`_used = 6`,`_size=8`
-B,C往后移动了，E的空缺被填补
-
-![image](http://upload-images.jianshu.io/upload_images/1342490-8e2feca17cda493e?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-在末端追加两个对象:
-`_offset = 2`,`_used = 8`,`_size=8`
-`_list`足够存储新加入的两个对象，因此没有重新分配，而是将两个新对象存储到了`_list`起始端
-
-![image](http://upload-images.jianshu.io/upload_images/1342490-80e5b222a0214da1?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-
-
-
-
-
-
-
-
-
-
-
-## 遍历的速度特点探究
-#### 1.for 循环&for in
-这两个速度是最快的，我们就以forin为例。forin遵从了`NSFastEnumeration`协议，它只有一个方法：
-```
-- (NSUInteger)countByEnumeratingWithState:
-(NSFastEnumerationState *)state
-objects:(id *)stackbuffer 
-count:(NSUInteger)len;
-```
-它直接从C数组中取对象。对于可变数组来说，它最多只需要两次就可以获取全部全速。如果数组还没有构成循环，那么第一次就获得了全部元素，跟不可变数组一样。但是如果数组构成了循环，那么就需要两次，第一次获取对象数组的起始偏移到循环数组末端的元素,第二次获取存放在循环数组起始处的剩余元素。    
-而for循环之所以慢一点，是因为for循环的时候每次都要调用`objectAtIndex:`
-假如我们遍历的时候不需要获取当前遍历操作所针对的下标，我们就可以选择forin。    
-####2.block循环
-这种循环虽然是最慢的，但是我们在遍历的时候可以直接从block中获取更多的信息，并且可以修改块的方法签名，以免进行类型转换操作。
-```
-for(NSString *key in aDictionary){
-NSString *object = (NSString *)aDictionary[key];
 }
-NSDictionary *aDictionary = /*...*/;
-[aDictionary enumerateKeysAndObjectsUsingBlock:
-^(NSString *key,NSString *obj,BOOL *stop){
 
-}];
+- (void)viewDidLoad {
+    [super viewDidLoad];    
+    [self registerNotifications];    
+}
+
+- (void)registerNotifications{
+
+    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+    [nc addObserver:self selector:@selector(scrensChanged:) name:UIScreenDidConnectNotification object:nil];
+}
+
+- (void)scrensChanged:(NSNotification *)nofi{
+    [self updateScreens];
+}
+
+- (void)updateScreens{
+
+    NSArray *screens = [UIScreen screens];
+    if (screens.count > 1) {
+        UIScreen *secondScreen = [screens objectAtIndex:1];
+        CGRect rect =secondScreen.bounds;
+        if (self.secondWindow == nil) {
+            self.secondWindow = [[UIWindow alloc]initWithFrame:rect];
+            self.secondWindow.screen = secondScreen;
+
+            LLScreen2ViewController *svc = [[LLScreen2ViewController alloc]init];
+            svc.parent = self;
+            self.secondWindow.rootViewController = svc;
+        }
+        self.secondWindow.hidden = NO;
+    }else{
+        [self disconnectFromScreen];
+    }
+}
+
+- (void)disconnectFromScreen{
+
+    if (self.secondWindow != nil) {
+        // 断开连接并释放内存
+        self.secondWindow.rootViewController = nil;
+        self.secondWindow.hidden = YES;
+        self.secondWindow = nil;
+    }
+}
+
+- (void)dealloc{
+
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+
+}
 
 ```
-并且如果需要需要并发的时候，也可以方便的使用dispatch group。   
-另外还有一点：如果数组的数量过多，除了block遍历，其他的遍历方法都需要添加autoreleasePool方法来优化。block不需要，因为系统在实现它的时候就已经实现了相关处理。
 
-## 参考文献
-[Effective Objective-C 2.0:编写高质量iOS与OS X代码的52个有效方法](https://detail.tmall.com/item.htm?spm=a230r.1.14.6.6f3c5210AspBot&id=560781916540&cm_id=140105335569ed55e27b&abbucket=14)   
-[NSMutableArray Class Reference](https://link.jianshu.com?t=https%3A%2F%2Fdeveloper.apple.com%2Flibrary%2Fios%2Fdocumentation%2FCocoa%2FReference%2FFoundation%2FClasses%2FNSMutableArray_Class%2FReference%2FReference.html)   
-[CFArray 的历史渊源及实现原理](https://www.desgard.com/CFArray/)  
-[Objective-C 数组遍历的性能及原理](https://www.jianshu.com/p/66f8410c6bbc)    
+### 五 其他硬件
+
+当你的应用进入后台是, 应该释放对这些硬件的锁定:
+
+*   蓝牙
+*   相机
+*   扬声器,除非应用是音乐类的
+*   麦克风
+
+基本规则: 只有当应用处于前台时才与这些硬件进行交互, 应用处于后台时应停止交互
+
+不过扬声器和无线蓝牙可能例外, 如果你正在开发音乐,收音机或其他的音频类应用,则需要在应用进入后台后继续使用扬声器.不要让屏幕仅仅为音频播放的目的而保持常量.类似的, 若应用还有未完成的数据传输, 则需要在应用进入后台后持续使用无线蓝牙,例如,与其他设备传输文件
+
+### 六 电池电量与代码感知
+
+
+一个智能的应用会考虑到电池的电量和自身的状态, 从而决定是否执行资源密集消耗性的操作（比如扫二维码时的手电）.另外一个有价值的点是对充电的判断,确定设备是否处于充电状态
+
+来看一下此处的代码实施
+
+```
+- (BOOL)shouldProceedWithMinLevel:(NSUInteger)minLevel{
+
+    UIDevice *device = [UIDevice currentDevice];
+    // 打开电池监控
+    device.batteryMonitoringEnabled = YES;
+
+    UIDeviceBatteryState state = device.batteryState;
+    // 在充电或电池已经充满的情况下,任何操作都可以执行
+    if (state == UIDeviceBatteryStateCharging ||
+        state == UIDeviceBatteryStateFull) {
+        return YES;
+    }    
+    // UIdevice 返回的 batteryLevel 的范围在0.00 ~ 1.00
+    NSUInteger batteryLevel = (NSUInteger)(device.batteryLevel * 100);
+    if (batteryLevel >= minLevel) {
+        return YES;
+    }
+    return NO;
+}
+
+```
+
+我们也可以得到应用对 CPU 的利用率
+
+```
+// 需要导入这两个头文件
+#import <mach/mach.h>
+#import <assert.h>
+
+- (float)appCPUUsage{
+    kern_return_t kr;
+    task_info_data_t info;
+    mach_msg_type_number_t infoCount = TASK_INFO_MAX;    
+    kr = task_info(mach_task_self(), TASK_BASIC_INFO, info, &infoCount);    
+    if (kr != KERN_SUCCESS) {
+        return -1;
+    }    
+    thread_array_t thread_list;
+    mach_msg_type_number_t thread_count;
+    thread_info_data_t thinfo;
+    mach_msg_type_number_t thread_info_count;
+    thread_basic_info_t basic_info_th;
+
+    kr = task_threads(mach_task_self(), &thread_list, &thread_count);
+    if (kr != KERN_SUCCESS) {
+        return -1;
+    }
+    float tot_cpu = 0;
+    int j;
+    for (j = 0; j < thread_count; j++) {
+        thread_info_count = THREAD_INFO_MAX;
+        kr = thread_info(thread_list[j], THREAD_BASIC_INFO, thinfo, &thread_info_count);
+
+        if (kr != KERN_SUCCESS) {
+            return -1;
+        }        
+        basic_info_th = (thread_basic_info_t)thinfo;
+        if (!(basic_info_th -> flags & TH_FLAGS_IDLE)) {
+            tot_cpu += basic_info_th -> cpu_usage / TH_USAGE_SCALE * 100.0;
+        }
+    }
+    vm_deallocate(mach_task_self(), (vm_offset_t)thread_list, thread_count * sizeof(thread_t));
+    return tot_cpu;
+
+}
+
+```
+
+当剩余电量较低时,提醒用户,并请求用户授权执行电源密集型的操作,---当然,只在 用户同意的前提下执行 总是用一个指示符(也就是进度条百分比)显示长时间任务的进度, 包括设备上即将完成的计算或者只是下载一些内容.向用户提供完成进度的估算, 以帮助他们决定是否需要为设备充电
+
+### 七 最佳实践
+
+以下的最佳实践可以确保对电量的谨慎使用, 遵循以下要点,应用可以实现对电量的高效使用.
+
+*   最小化硬件使用. 换句话说,尽可能晚的与硬件打交道, 并且一旦完成任务立即结束使用
+*   在进行密集型任务前, 检查电池电量和充电状态
+*   在电量低时, 提示用户是否确定要执行任务,并在用户同意后再执行
+*   或提供设置的选项,允许用户定义电量的阈值,以便在执行秘籍型操作前提示用户
+
+下边代码展示了设置电量的阈值以提示用户.
+
+```
+
+- (IBAction)onIntensiveOperationButtonClick:(id)sender {
+
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+
+    BOOL prompt = [defaults boolForKey:@"promptForBattery"];
+    int minLevel = [defaults integerForKey:@"minBatteryLevel"];
+
+    BOOL canAutoProceed = [self shouldProceeWithMinLevel:minLevel];
+
+    if (canAutoProceed) {
+        [self executeIntensiveOperation];
+    }else{
+
+        if (prompt) {
+            UIAlertView *view = [[UIAlertView alloc]initWithTitle:@"提示" message:@"电量低于最小值,是否继续执行" delegate: self cancelButtonTitle:@"取消" otherButtonTitles:@"确定"];
+            [view show];
+        }else{
+
+            [self queueIntensiveOperation];
+        }
+    }
+}
+
+- (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex{
+
+    if (buttonIndex == 0) {
+        [self queueIntensiveOperation];
+    }else{
+        [self executeIntensiveOperation];
+    }
+}
+
+```
+
+
+
+*   设置由两个条目组成:`promptForBattery`(应用设置中的拨动开关,表明是否要在低电量时给予提示)和`miniBatteryLevel`(区间为0~100的一个滑块,表明了最低电量------在此示例中,用户可以自行调整),在实际项目中应用的开发人员通常根据操作的复杂性和密集性对阈值进行预设.不同的密集型操作可能会有不同的最低电量需求
+*   在实际执行密集操作之前,检查当前电量是否足够, 或者手机是否正在充电.这就是我们判断是否可以进行后续处理的逻辑,图中你可以有自己的定制---最低电量和充电状态
+
+> 用户总是随身携带者手机,所以编写省电的代码就格外重要, 毕竟手机的移动电源并不是随处可见,不过现在北京的街电共享充电宝好像很不错 本人逛街会经常使用街电充电宝,但还是要尽可能的为用户省电 在无法降低任务复杂性时, 提供一个对电池电量保持敏感的方案并在适当的时机提示用户, 会让用户感觉很良好, 并且因此会成为你 APP 的永久用户
+
