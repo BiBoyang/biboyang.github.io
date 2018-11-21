@@ -123,7 +123,7 @@ hash是一种用于处理查找时非常高效的数据结构。时间复杂度�
 [深入理解哈希表](https://github.com/bestswifter/blog/blob/master/articles/hashtable.md)
 不过，我下边说的是一种NSString的hash很有趣的东西。
 我们打开[	CF-1153.18.tar.gz](https://opensource.apple.com/tarballs/CF/CF-1153.18.tar.gz)。
-在`CFString.h`中，有一段很有意思的话
+在`CFString.c`中，有一段很有意思的话
 ```
 /* String hashing: Should give the same results whatever the encoding; so we hash UniChars.
 If the length is less than or equal to 96, then the hash function is simply the 
