@@ -246,13 +246,16 @@ CF_INLINE CFHashCode __CFStrHashEightBit(const uint8_t *cContents, CFIndex len) 
 ```
 我又写了一个代码做了实验，实现代码如下：
 ```
-//注意，bbb的第33位进行了修改
-NSString *aaa = @"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbccccccccccccccccccccccccccccccddddddddddddddddddddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
-NSString *bbb = @"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbabbbbbbbbbbbbbbbbbbbbbbbbbbbccccccccccccccccccccccccccccccddddddddddddddddddddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
-    
+
+//注意，倒数第33位进行了修改
+    NSString *aaa = @"qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqbbwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwqeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    NSString *bbb = @"qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqbbwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+
+
 BOOL equalA = (aaa == bbb);//False
 BOOL equalB = [aaa isEqual:bbb];//False
 BOOL equalC = ([aaa hash] == [bbb hash]);//True
+
 ```
 
 由此可见，NSString的hash值，确实有点靠不住。
