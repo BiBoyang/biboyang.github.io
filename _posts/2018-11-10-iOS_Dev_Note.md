@@ -4,6 +4,8 @@ title: block笔记（四）：扩展问题
 date: 2018-11-11 
 tags: iOS
 ---
+
+# block（四）：修改block的实现
 这里将通过几道面试题来扩展知识。
 这几道题取自[sunnyxx](http://blog.sunnyxx.com/)。
 ## Question1 如何在禁止直接调用block的情况下继续使用block?
@@ -135,6 +137,53 @@ static void blockCleanUp(__strong void(^*block)(void)){
 我才疏学浅，只对第一第二个有实现，第三个问题有思路但是确实没写出来（😌）。
 
 #### 第一题
+我最开始的思路是这样的，将block的结构替换实现出来，作为中间体用来暂存方法指针。然后同样实现替换block的结构体，用来装载。
+```
+//中间体
+typedef struct __block_impl {
+    void *isa;
+    int Flags;
+    int Reserved;
+    void *FuncPtr;
+}__block_impl;
+
+//接受体
+typedef struct __block_impl_replace {
+    void *isa_replace;
+    int Flags_replace;
+    int Reserved_replace;
+    void *FuncPtr_replace;
+}__block_impl_replace;
+
+
+//替换方法
+void hookBlockMethod() {
+    NSLog(@"黄河入海流");
+}
+
+void HookBlockToPrintHelloWorld(id block) {
+    __block_impl_replace *ptr = (__bridge __block_impl *)block;
+    ptr->FuncPtr_replace = &hookBlockMethod;
+}
+```
+注意，结构体里的方法名不比和系统block中的方法名相同，这里这么写只不过是为了标明。
+这里事实上是会触发一个警告 ``Incompatible pointer types initializing '__block_impl_replace *' (aka 'struct __block_impl_replace *') with an expression of type '__block_impl *' (aka 'struct __block_impl *')``
+警告我们这两个方法并不兼容。实际上，这两个结构体里的方法名不比相同，甚至个数不同都可以，但是一定要保证前四个成员的类型是对应了;前四个成员是存储block内部数据的关键。
+在四个成员下边接着又其他成员也是无所谓的。
+```
+typedef struct __block_impl_replace {
+    void *isa_replace;
+    int Flags_replace;
+    int Reserved_replace;
+    void *FuncPtr_replace;
+    void *aaa;
+    void *bbb;
+    void *ccc;
+}__block_impl_replace;
+```
+比如这种方式，实际上方法依然成立。
+当然，这种方式也是可以优化的。比如说我们就可以吧中间结构体和替换block结合。
+比如下面的这个就是优化之后的结果。
 ```
 typedef struct __block_impl {
     void *isa;
@@ -161,7 +210,7 @@ void HookBlockToPrintHelloWorld(id block) {
     HookBlockToPrintHelloWorld(block);
     block();
 ```
-
+  
 这里我们就可以打印出来 ``黄河入海流``了。
 但是，我们如果想要原本的方法也也打印出来该怎么处理呢？
 方法很简单
@@ -217,3 +266,6 @@ void HookBlockToPrintArguments(id block) {
 我当时的思路是在把block提出一个父类，然后在去统一修改。
 但是后来冬瓜介绍了fishhook框架，我的思路就变了。
 在ARC中我们使用的都是堆block，但是创建的时候是栈block，它会经过一个copy的过程，将栈block转换成堆block，中间会有objc_retainBlock->_Block_copy->_Block_copy_internal方法链。我们可以hook这几个方法，去修改。
+
+
+[demo地址](https://github.com/BiBoyang/BBY_TESTDEMO/blob/master/BlockBlogTest.zip)
