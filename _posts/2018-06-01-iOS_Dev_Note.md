@@ -5,6 +5,8 @@ date: 2018-06-01
 tags: iOS
 ---
 ## 简单概述
+先说结论：
+
 > block是C语言的扩充功能，我们可以认为它是 **带有自动变量的匿名函数**。
 
 block是一个匿名的inline代码集合：
@@ -441,8 +443,181 @@ int main(int argc, const char * argv[]) {
 
 根据打印出来的结果来看，ARC环境下，Block捕获外部对象变量，是都会copy一份的，地址都不同。只不过带有__block修饰符的变量会被捕获到Block内部持有。
 
-
 在ARC中，对于声明为__block的外部对象，在block内部会进行retain，以至于在block环境内能安全的引用外部对象。
+
+## 实例变量的问题
+之前一直没有想到过一个问题：
+我们知道不应该在block中使用实例变量，是因为会发生循环引用；那为什么会发生循环引用呢？
+受[谈谈ivar的直接访问](http://satanwoo.github.io/2018/02/04/iOS-iVar/)的启发，我也开始探索一下这里的原因。
+写如下的代码：
+```
+
+#import <Foundation/Foundation.h>
+#import "objc/runtime.h"
+
+typedef void(^MyBlock)(void);
+
+@interface MyObject : NSObject
+@property (nonatomic) NSUInteger BRInteger;
+@property (nonatomic, copy) NSString *BRString;
+@property (nonatomic, copy) MyBlock BRBlock;
+
+- (void)inits;
+
+@end
+
+@implementation MyObject
+- (void)inits
+{
+    self.BRBlock = ^{
+        _BRInteger = 5;
+        _BRString = @"Balaeniceps_rex";
+    };
+}
+@end
+
+int main(int argc, const char * argv[]) {
+    @autoreleasepool {
+        
+        MyObject *object = [MyObject new];
+        [object inits];
+    }
+    return 0;
+}
+```
+使用 **clang -rewrite-objc -fobjc-arc -stdlib=libc++ -mmacosx-version-min=10.7 -fobjc-runtime=macosx-10.7 -Wno-deprecated-declarations main.m**命令进行转换。得到以下的代码（为了简便，将代码做了省略）：
+
+```
+typedef void(*MyBlock)(void);
+
+
+#ifndef _REWRITER_typedef_MyObject
+#define _REWRITER_typedef_MyObject
+typedef struct objc_object MyObject;
+typedef struct {} _objc_exc_MyObject;
+#endif
+
+//对于每个ivar，都有对应的全局变量
+extern "C" unsigned long OBJC_IVAR_$_MyObject$_BRInteger;
+extern "C" unsigned long OBJC_IVAR_$_MyObject$_BRString;
+extern "C" unsigned long OBJC_IVAR_$_MyObject$_BRBlock;
+//内部的结构
+struct MyObject_IMPL {
+    struct NSObject_IMPL NSObject_IVARS;
+    NSUInteger _BRInteger;
+    NSString *__strong _BRString;
+    __strong MyBlock _BRBlock;
+};
+
+// @property (nonatomic) NSUInteger BRInteger;
+// @property (nonatomic, copy) NSString *BRString;
+// @property (nonatomic, copy) MyBlock BRBlock;
+
+// - (void)inits;
+
+/* @end */
+
+
+// @implementation MyObject
+
+struct __MyObject__inits_block_impl_0 {
+    struct __block_impl impl;
+    struct __MyObject__inits_block_desc_0* Desc;
+    MyObject *const __strong self;
+    
+    //注意这里捕捉了self
+    __MyObject__inits_block_impl_0(void *fp, struct __MyObject__inits_block_desc_0 *desc, MyObject *const __strong _self, int flags=0) : self(_self) {
+        impl.isa = &_NSConcreteStackBlock;
+        impl.Flags = flags;
+        impl.FuncPtr = fp;
+        Desc = desc;
+    }
+};
+
+//block的函数方法（也就是方法layout中第四行的那个）
+static void __MyObject__inits_block_func_0(struct __MyObject__inits_block_impl_0 *__cself) {
+    MyObject *const __strong self = __cself->self; // bound by copy
+    //这里是通过self的地址，那倒全局变量的偏移去获取实例变量的地址
+    (*(NSUInteger *)((char *)self + OBJC_IVAR_$_MyObject$_BRInteger)) = 5;
+    (*(NSString *__strong *)((char *)self + OBJC_IVAR_$_MyObject$_BRString)) = (NSString *)&__NSConstantStringImpl__var_folders_m1_05zb_zbd1g1f8k27nc6yn_th0000gn_T_main_e9db32_mi_0;
+}
+static void __MyObject__inits_block_copy_0(struct __MyObject__inits_block_impl_0*dst, struct __MyObject__inits_block_impl_0*src) {_Block_object_assign((void*)&dst->self, (void*)src->self, 3/*BLOCK_FIELD_IS_OBJECT*/);}
+
+static void __MyObject__inits_block_dispose_0(struct __MyObject__inits_block_impl_0*src) {_Block_object_dispose((void*)src->self, 3/*BLOCK_FIELD_IS_OBJECT*/);}
+
+static struct __MyObject__inits_block_desc_0 {
+    size_t reserved;
+    size_t Block_size;
+    void (*copy)(struct __MyObject__inits_block_impl_0*, struct __MyObject__inits_block_impl_0*);
+    void (*dispose)(struct __MyObject__inits_block_impl_0*);
+} __MyObject__inits_block_desc_0_DATA = { 0, sizeof(struct __MyObject__inits_block_impl_0), __MyObject__inits_block_copy_0, __MyObject__inits_block_dispose_0};
+
+static void _I_MyObject_inits(MyObject * self, SEL _cmd) {
+    ((void (*)(id, SEL, MyBlock))(void *)objc_msgSend)((id)self, sel_registerName("setBRBlock:"), ((void (*)())&__MyObject__inits_block_impl_0((void *)__MyObject__inits_block_func_0, &__MyObject__inits_block_desc_0_DATA, self, 570425344)));
+}
+
+static NSUInteger _I_MyObject_BRInteger(MyObject * self, SEL _cmd) { return (*(NSUInteger *)((char *)self + OBJC_IVAR_$_MyObject$_BRInteger)); }
+static void _I_MyObject_setBRInteger_(MyObject * self, SEL _cmd, NSUInteger BRInteger) { (*(NSUInteger *)((char *)self + OBJC_IVAR_$_MyObject$_BRInteger)) = BRInteger; }
+
+static NSString * _I_MyObject_BRString(MyObject * self, SEL _cmd) { return (*(NSString *__strong *)((char *)self + OBJC_IVAR_$_MyObject$_BRString)); }
+extern "C" __declspec(dllimport) void objc_setProperty (id, SEL, long, id, bool, bool);
+
+static void _I_MyObject_setBRString_(MyObject * self, SEL _cmd, NSString *BRString) { objc_setProperty (self, _cmd, __OFFSETOFIVAR__(struct MyObject, _BRString), (id)BRString, 0, 1); }
+
+static void(* _I_MyObject_BRBlock(MyObject * self, SEL _cmd) )(){ return (*(__strong MyBlock *)((char *)self + OBJC_IVAR_$_MyObject$_BRBlock)); }
+static void _I_MyObject_setBRBlock_(MyObject * self, SEL _cmd, MyBlock BRBlock) { objc_setProperty (self, _cmd, __OFFSETOFIVAR__(struct MyObject, _BRBlock), (id)BRBlock, 0, 1); }
+// @end
+
+int main(int argc, const char * argv[]) {
+    /* @autoreleasepool */ { __AtAutoreleasePool __autoreleasepool;
+        
+        MyObject *object = ((MyObject *(*)(id, SEL))(void *)objc_msgSend)((id)objc_getClass("MyObject"), sel_registerName("new"));
+        ((void (*)(id, SEL))(void *)objc_msgSend)((id)object, sel_registerName("inits"));
+    }
+    return 0;
+}
+```
+我们可以发现，每个实例变量都是被创建了对应的全局变量：
+```
+extern "C" unsigned long OBJC_IVAR_$_MyObject$_BRInteger;
+extern "C" unsigned long OBJC_IVAR_$_MyObject$_BRString;
+extern "C" unsigned long OBJC_IVAR_$_MyObject$_BRBlock;
+```
+下面是block的layout中的第四排的函数调用方法。
+```
+//block的函数方法（也就是方法layout中第四行的那个）
+static void __MyObject__inits_block_func_0(struct __MyObject__inits_block_impl_0 *__cself) {
+    MyObject *const __strong self = __cself->self; // bound by copy
+    //这里是通过self的地址，那倒全局变量的偏移去获取实例变量的地址
+    (*(NSUInteger *)((char *)self + OBJC_IVAR_$_MyObject$_BRInteger)) = 5;
+    (*(NSString *__strong *)((char *)self + OBJC_IVAR_$_MyObject$_BRString)) = (NSString *)&__NSConstantStringImpl__var_folders_m1_05zb_zbd1g1f8k27nc6yn_th0000gn_T_main_e9db32_mi_0;
+}
+```
+通过这里，我们其实也能发现，这里是通过self的偏移去获取实例变量的地址，也是和self息息相关的。
+如果这个还不会证明实例变量中的self的作用的话，我们接着往下看；
+```
+struct __MyObject__inits_block_impl_0 {
+    struct __block_impl impl;
+    struct __MyObject__inits_block_desc_0* Desc;
+    MyObject *const __strong self;
+    
+    //注意这里捕捉了self
+    __MyObject__inits_block_impl_0(void *fp, struct __MyObject__inits_block_desc_0 *desc, MyObject *const __strong _self, int flags=0) : self(_self) {
+        impl.isa = &_NSConcreteStackBlock;
+        impl.Flags = flags;
+        impl.FuncPtr = fp;
+        Desc = desc;
+    }
+};
+```
+在这个方法里，我们可以发现，在block当中，其实也引用到MyObject，是一个强引用的self！而block的构造函数中也多次引用了self。
+我们如果了解过property的话，也会知道实例变量是在编译期就确定地址了。内部实现的全局变量就代表了地址的offset。
+
+
+
+
+
+
 
 ## 参考
 [Blocks Programming Topics](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/Blocks/Articles/00_Introduction.html#//apple_ref/doc/uid/TP40007502-CH1-SW1)
