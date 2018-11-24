@@ -1,6 +1,6 @@
 ---
 layout: post
-title: block笔记（三）：内存泄漏
+title: block笔记（三）：内存泄漏和关键字
 date: 2018-06-19 
 tags: iOS
 ---
@@ -280,6 +280,10 @@ weakSelf是为了让block不去持有self，避免了循环引用，如果在Blo
 
 
 
-
-
-
+#### 关键字
+我们通过之前的文章知道，在ARC当中，一般的block会从栈被copy到堆中。
+但是如果使用weak呢？（assign就不讨论了）
+系统会告知我们 **Assigning block literal to a weak property; object will be released after assignment**。
+而在ARC下要使用什么关键字呢？
+strong和copy都是可以的。
+之前我们知道，在ARC中，block会自动从栈被复制到堆中，这个copy是自动了，即使使用strong还是依然会有copy操作。
