@@ -9,8 +9,8 @@ tag: iOS
 以下，是我长时间工作学习中积攒下来的碎片，积攒了足够多了，就应该拿出来亮一亮了。
 #### 读书读出来的问题
 前段日子我为了学习英语，阅读《Effective Objective-C 2.0》的原版的时候，我发现了之前没怎么注意到的一段话：
-> In the case of NSArray, when an instance is allocated, it’s an instance of another class that’s allocated (during a call to alloc), known as a placeholder array. This placeholder array is then converted to an instance of another class, which is a concrete subclass of NSArray.
-在使用了NSArray的alloc方法来获取实例时，该方法首先会分类一个属于某类的实例，此实例充当“占位数组”。该数组稍后会转为另一个类的实例，而那个类则是NSArray的实体子类。
+> In the case of NSArray, when an instance is allocated, it’s an instance of another class that’s allocated (during a call to alloc), known as a placeholder array. This placeholder array is then converted to an instance of another class, which is a concrete subclass of NSArray.                          
+> 在使用了NSArray的alloc方法来获取实例时，该方法首先会分类一个属于某类的实例，此实例充当“占位数组”。该数组稍后会转为另一个类的实例，而那个类则是NSArray的实体子类。
 
 话不多说，代码写两行：
 ```
@@ -50,8 +50,8 @@ NSLog(@"mArr3: %s", object_getClassName(mArr3));
 ```
 清晰易懂，我们可以看到，不管创建的事可变还是不可变的数组，在alloc之后得到的类都是**__NSPlaceholderArray**。而当我们init一个不可变的空数组之后，得到的是**__NSArray0**；如果有且只有一个元素，那就是**__NSSingleObjectArrayI**；有多个元素的，叫做 **__NSArrayI**；init出来一个可变数组的话，都是 **__NSArrayM**。
 
-
 ![](https://upload-images.jianshu.io/upload_images/1342490-270c017a4b4a3579.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
 我们看到__NSPlaceholderArray的名字就知道它是用来占位的。
 那它是什么呢？我们继续写几行代码：
 ```
@@ -67,12 +67,13 @@ NSLog(@"placeholder2: %p", placeholder2);
 ```
 这两个内存地址是一样的，我们可以猜测，这里是生成了一个单例，在执行init之后就被新的实例给更换掉了。**该类内部只有一个isa指针**，除此之外没有别的东西。
 由于苹果没有公开此处的源码，我查阅了别的类似的开源以及资料，得到如下的结论：
-> 1、当元素为空时，返回的是__NSArray0的单例；
-2、当元素仅有一个时，返回的是__NSSingleObjectArrayI的实例；
-3、当元素大于一个的时候，返回的是__NSArrayI的实例。
-4、网上的资料，大多未提及__NSSingleObjectArrayI，可能是后面新增的，理由大概还是为了效率，在此不深究。
+> 1. 当元素为空时，返回的是__NSArray0的单例；
+> 2. 当元素仅有一个时，返回的是__NSSingleObjectArrayI的实例；
+> 3. 当元素大于一个的时候，返回的是__NSArrayI的实例。
+> 4. 网上的资料，大多未提及__NSSingleObjectArrayI，可能是后面新增的，理由大概还是为了效率，在此不深究。
 
-为了区别可变和不可变的情况，在init的时候，会根据是NSArray还是NSMutableArray来创建immutablePlaceholder和mutablePlaceholder，它们都是__NSPlaceholderArray类型的。
+为了区别可变和不可变的情况，在init的时候，会根据是NSArray还是NSMutableArray来创建 **immutablePlaceholder**和 **mutablePlaceholder**，它们都是__NSPlaceholderArray类型的。
+
 #### 创建数组
 在上面的多种创建数组的方法里，都是最后调用了initWithObjects:count:函数。
 ```
@@ -87,8 +88,9 @@ NSLog(@"placeholder2: %p", placeholder2);
 @end
 ```
 这就是类族的优点，在创建某个类族的子类的时候，我们不需要实现所有的功能。在CoreFoundation的类蔟的抽象工厂基类（如NSArray、NSString、NSNumber等）中，Primitive methods指的就是这些核心的方法，也就是那些在创建子类时必须要重写的方法，通常在类的interface中声明，在文档中一般也会说明。其他可选实现的方法在Category中声明。同时还需要注意其整个继承树的祖先的Primitive methods也都需要实现。
-####CFArray和NSMutableArray
-CFArray是CoreFoundation中的，和Foundation中的NSArray相对应，他们是**Toll-Free Bridged**的。通过阅读 [ibireme](https://blog.ibireme.com/2014/02/17/cfarray/)的这篇博客，我们可以知道，CFArray最开始是使用双端队列实现的，但是因为性能问题，后来发生了改变，因为没有开源代码，ibireme只能通过测试来猜测它可能换成[圆形缓冲区](https://en.wikipedia.org/wiki/Circular_buffer)来实现了（但是现在可以确定还是双端队列）。
+
+#### CFArray和NSMutableArray
+CFArray是CoreFoundation中的，和Foundation中的NSArray相对应，他们是 **Toll-Free Bridged**的。通过阅读 [ibireme](https://blog.ibireme.com/2014/02/17/cfarray/)的这篇博客，我们可以知道，CFArray最开始是使用双端队列实现的，但是因为性能问题，后来发生了改变，因为没有开源代码，ibireme只能通过测试来猜测它可能换成[圆形缓冲区](https://en.wikipedia.org/wiki/Circular_buffer)来实现了（但是现在可以确定还是双端队列）。
 任何典型的程序员都知道 C 数组的原理。可以归结为一段能被方便读写的连续内存空间。数组和指针并不相同 (详见 [Expert C Programming](https://link.jianshu.com?t=http%3A%2F%2Fwww.amazon.com%2FExpert-Programming-Peter-van-Linden%2Fdp%2F0131774298) 或 [这篇文章](https://link.jianshu.com?t=http%3A%2F%2Feli.thegreenplace.net%2F2009%2F10%2F21%2Fare-pointers-and-arrays-equivalent-in-c%2F))，不能说：一块被 **malloc** 过的内存空间等同于一个数组 (一种被滥用了的说法)。
 
 使用一段线性内存空间的一个最明显的缺点是，在下标 0 处插入一个元素时，需要移动其它所有的元素，即 **memmove** 的原理：
@@ -107,7 +109,8 @@ CFArray是CoreFoundation中的，和Foundation中的NSArray相对应，他们是
 
 ![](https://upload-images.jianshu.io/upload_images/1342490-fd825000c47dd36a.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
 ![](http://upload-images.jianshu.io/upload_images/1342490-1a27f1fd852e2c30?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-####NSMutableArray的方法
+
+#### NSMutableArray的方法
 正如 [NSMutableArray Class Reference](https://link.jianshu.com?t=https%3A%2F%2Fdeveloper.apple.com%2Flibrary%2Fios%2Fdocumentation%2FCocoa%2FReference%2FFoundation%2FClasses%2FNSMutableArray_Class%2FReference%2FReference.html) 的讨论，每个 **NSMutableArray** 子类必须实现下面 7 个方法：
 
 *   **- count**
@@ -121,7 +124,9 @@ CFArray是CoreFoundation中的，和Foundation中的NSArray相对应，他们是
 毫不意外的是，**__NSArrayM** 履行了这个规定。然而，**__NSArrayM** 的所有实现方法列表相当短且不包含 21 个额外的在 **NSMutableArray** 头文件列出来的方法。谁负责执行这些方法呢？
 
 这证明它们只是 **NSMutableArray** 类自身的一部分。这会相当的方便：任何 **NSMutableArray** 的子类只须实现 7 个最基本的方法。所有其它高等级的抽象建立在它们的基础之上。例如 **- removeAllObjects** 方法简单地往回迭代，一个个地调用 **- removeObjectAtIndex:**。
+
 ##遍历数组的n个方法
+
 #### 1.for 循环
 ```
 for (int i = 0;  i < array.count; ++i) {
@@ -160,6 +165,7 @@ xxx
 其中for in的耗时一直都是最低的，当对象数高达100万的时候，for in耗时也没有超过5ms.  
 其次是for循环耗时较低，反而，直觉上应该非常快速的多线程遍历方式却是性能最差的。   
 我们来看一下内部结构：
+
 **1\. __NSArrayI**
 __NSArrayI的结构定义为:
 
@@ -176,7 +182,9 @@ id _list[0];
 `_used`是数组的元素个数,调用`[array count]`时，返回的就是`_used`的值。  
 这里我们可以把`id _list[0]`当作`id *_list`来用，即一个存储`id`对象的`buff`. 
 由于`__NSArrayI`的不可变,所以`_list`一旦分配，释放之前都不会再有移动删除操作了，只有获取对象一种操作.因此`__NSArrayI`的实现并不复杂. 
+
 **2\. __NSSingleObjectArrayI**
+
 __NSSingleObjectArrayI的结构定义为:
 
 ```
@@ -189,7 +197,9 @@ id object;
 ```
 
 因为只有在"创建只包含一个对象的不可变数组"时,才会得到`__NSSingleObjectArrayI`对象，所以其内部结构更加简单，一个`object`足矣.
+
 **3\. __NSArrayM**
+
 __NSArrayM的结构定义为:
 
 ```
@@ -244,17 +254,10 @@ B,C往后移动了，E的空缺被填补
 
 
 
-
-
-
-
-
-
-
-
-
 ## 遍历的速度特点探究
+
 #### 1.for 循环&for in
+
 这两个速度是最快的，我们就以forin为例。forin遵从了`NSFastEnumeration`协议，它只有一个方法：
 ```
 - (NSUInteger)countByEnumeratingWithState:
@@ -264,8 +267,9 @@ count:(NSUInteger)len;
 ```
 它直接从C数组中取对象。对于可变数组来说，它最多只需要两次就可以获取全部全速。如果数组还没有构成循环，那么第一次就获得了全部元素，跟不可变数组一样。但是如果数组构成了循环，那么就需要两次，第一次获取对象数组的起始偏移到循环数组末端的元素,第二次获取存放在循环数组起始处的剩余元素。    
 而for循环之所以慢一点，是因为for循环的时候每次都要调用`objectAtIndex:`
-假如我们遍历的时候不需要获取当前遍历操作所针对的下标，我们就可以选择forin。    
-####2.block循环
+假如我们遍历的时候不需要获取当前遍历操作所针对的下标，我们就可以选择forin。   
+ 
+#### 2.block循环
 这种循环虽然是最慢的，但是我们在遍历的时候可以直接从block中获取更多的信息，并且可以修改块的方法签名，以免进行类型转换操作。
 ```
 for(NSString *key in aDictionary){
