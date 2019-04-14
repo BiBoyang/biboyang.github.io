@@ -8,7 +8,7 @@ tags: iOS
 # RunLoop笔记
 
 对于最开始我们写的程序来说，执行完任务之后就会退出。
-比如这样
+比如这样的
 
 ```
 int main(int argc, char * argv[]) {

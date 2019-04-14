@@ -423,7 +423,7 @@ id weak_register_no_lock(weak_table_t *weak_table, id referent_id,
  
  这里有一个 **append_referrer**函数
 
-n ```
+```
  static void append_referrer(weak_entry_t *entry, objc_object **new_referrer) {
     if (! entry->out_of_line()) {
         // Try to insert inline.
@@ -468,10 +468,14 @@ n ```
     ref = new_referrer;
     entry->num_refs++;
 }
- ```
- 这里的关键代码在于，标明了，weak的hash表，会在使用率在75%的时候进行扩充。扩充的方法是很简单的copy法。
 
- ```
+```
+
+ 
+这里的关键代码在于，标明了，weak的hash表，会在使用率在75%的时候进行扩充。扩充的方法是很简单的copy法。
+了 
+
+```
  __attribute__((noinline, used))
 static void grow_refs_and_insert(weak_entry_t *entry, 
                                  objc_object **new_referrer)
@@ -498,11 +502,14 @@ static void grow_refs_and_insert(weak_entry_t *entry,
     append_referrer(entry, new_referrer);
     if (old_refs) free(old_refs);
 }
- ```
- 扩充一个容量是原来两倍的新hash表，并将老hash表的元素插入到新的hash表中。
+
+```
+
+扩充一个容量是原来两倍的新hash表，并将老hash表的元素插入到新的hash表中。
  那么既然有扩充，也势必会有缩小。如果hash表中内容过少，我们就应该及时的缩小这个hash表，以免空间的浪费。
 
- ```
+
+```
  static void weak_compact_maybe(weak_table_t *weak_table)
 {
     size_t old_size = TABLE_SIZE(weak_table);
@@ -512,8 +519,9 @@ static void grow_refs_and_insert(weak_entry_t *entry,
         // leaves new table no more than 1/2 full
     }
 }
- ```
- 如果空间使用率小于1/16的时候，就会把空间缩小为原有的1/8。
+ 
+```
+如果空间使用率小于1/16的时候，就会把空间缩小为原有的1/8。
  
 ## 销毁过程
 释放对象的时候，基本流程如下
