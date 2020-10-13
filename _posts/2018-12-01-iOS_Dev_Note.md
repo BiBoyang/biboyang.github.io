@@ -1,5 +1,5 @@
 ---
-title: Writing a New Post
+title: Writing a Neeew Post
 author: Cotes Chung
 date: 2019-08-10 14:10:00 +0800
 categories: [Blogging, Tutorial]
