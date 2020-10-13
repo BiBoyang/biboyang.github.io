@@ -2,7 +2,7 @@
 layout: post
 title: block笔记（三）：内存泄漏和关键字
 date: 2018-06-19 
-tags: [iOS,book]
+tags: iOS
 ---
 > 在不特殊说明是MRC的情况下，默认是ARC。
 [Objective-C Automatic Reference Counting (ARC)](http://clang.llvm.org/docs/AutomaticReferenceCounting.html)
@@ -12,7 +12,6 @@ tags: [iOS,book]
 通过之前的研究，了解到在 **__main_block_impl_0**中会保存着引用到的变量。在转换过的block代码中，block会强行持有拦截的外部对象，不管有没有改变过，都是会造成强引用。
 
 # __string和__weak
-
 ## __strong
 __strong实际上是一个默认的方法。
 ```
