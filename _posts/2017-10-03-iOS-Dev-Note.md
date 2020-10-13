@@ -2,7 +2,7 @@
 title: 《Effective Objective-C》读书小记
 author: Boyang
 date: 2016-08-08 11:33:00 +0800
-categories: [Blogging, Demo]
+categories: [HaHa]
 tags: [iOS,book]
 math: true
 
