@@ -1,9 +1,11 @@
 ---
-layout: post
 title: 《Effective Objective-C 2.0编写高质量iOS与OS X代码的52个有效方法》读书小记
-date: 2017-10-03 
-tag: iOS
-
+author: Cotes Chung
+date: 2019-08-08 11:33:00 +0800
+categories: [Blogging, Demo]
+tags: [iOS]
+math: true
+image: /assets/img/sample/devices-mockup.png
 ---
 
 
