@@ -1,8 +1,9 @@
 ---
-layout: post
-title: 从头开始做一个开发助手工具（一）：控件的搭建
-date: 2018-12-01
-tags: iOS
+title: Writing a New Post
+author: Cotes Chung
+date: 2019-08-10 14:10:00 +0800
+categories: [Blogging, Tutorial]
+tags: [writing]
 ---
 
 ## 起因
