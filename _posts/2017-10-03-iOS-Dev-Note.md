@@ -1,12 +1,11 @@
 ---
-title: 《Effective Objective-C 2.0编写高质量iOS与OS X代码的52个有效方法》读书小记
+title: 《Effective Objective-C》读书小记
 author: Boyang
 date: 2016-08-08 11:33:00 +0800
 categories: [Blogging, Demo]
 tags: [iOS]
 math: true
-<!--image: /assets/img/sample/devices-mockup.png
--->
+
 ---
 
 
