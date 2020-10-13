@@ -1,62 +1,33 @@
-<section class="footer">
-    <footer>
-        <div class = "footer_div">  
-        <nav class="cover-navigation navigation--social">
-          <ul class="navigation">
+<!--
+  The Footer
+  v2.0
+  https://github.com/cotes2020/jekyll-theme-chirpy
+  © 2017-2019 Cotes Chung
+  MIT License
+-->
 
-          {% if site.social.weibo %}
-          <!-- Weibo -->
-          <li class="navigation__item_social">
-            <a href="http://weibo.com/{{site.social.weibo}}" title="@{{site.social.weibo}} 的微博" target="_blank">
-              <i class='social fa fa-weibo fa-2x'></i>
-              <span class="label">Weibo</span>
-            </a>
-          </li>
-          {% endif %}
+<footer class="d-flex w-100 justify-content-center">
+  <div class="d-flex justify-content-between align-items-center">
+    <div class="footer-left">
+      <p class="mb-0">
+        © {{ 'now' | date: "%Y" }}
+        <a href="{{ site.social.links[0] }}">{{ site.social.name }}</a>.
+        {% if site.data.rights.brief %}
+        <span data-toggle="tooltip" data-placement="top"
+          title="{{ site.data.rights.verbose }}">{{ site.data.rights.brief }}</span>
+        {% endif %}
+      </p>
+    </div>
 
-          {% if site.social.github %}
-          <!-- Github -->
-          <li class="navigation__item_social">
-            <a href="https://github.com/{{site.social.github}}" title="@{{site.social.github}} 的 Github" target="_blank">
-              <i class='social fa fa-github fa-2x'></i>
-              <span class="label">Github</span>
-            </a>
-          </li>
-          {% endif %}
-          
-          {% if site.social.twitter %}
-          <!-- Twitter -->
-          <li class="navigation__item_social">
-            <a href="http://twitter.com/{{site.social.twitter}}" title="@{{site.social.twitter}}" target="_blank">
-              <i class='social fa fa-twitter fa-2x'></i>
-              <span class="label">Twitter</span>
-            </a>
-          </li>
-          {% endif %}
+    <div class="footer-right">
+      <p class="mb-0">
+        Powered by
+        <a href="https://jekyllrb.com" target="_blank">Jekyll</a>
+        with
+        <a href="https://github.com/cotes2020/jekyll-theme-chirpy/">Chirpy</a>
+        theme.
+      </p>
+    </div>
 
-          {% if site.social.gplus %}
-          <!-- Google Plus -->
-          <li class="navigation__item_social">
-            <a href="https://plus.google.com/{{site.social.gplus}}" rel="author" title="Google+" target="_blank">
-              <i class='social fa fa-google-plus-square fa-2x'></i>
-              <span class="label">Google Plus</span>
-            </a>
-          </li>
-          {% endif %}
-
-
-          {% if site.social.mail %}
-          <!-- Email -->
-          <li class="navigation__item_social">
-            <a href="mailto:{{site.social.mail}}" title="Contact me">
-              <i class='social fa fa-envelope fa-2x'></i>
-              <span class="label">Email</span>
-            </a>
-          </li>
-          {% endif %}
-
-          </ul>
-        </nav>
-        <div>
-    </footer>
-</section>
+  </div> <!-- div.d-flex -->
+</footer>
