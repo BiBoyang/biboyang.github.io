@@ -2,7 +2,7 @@
 layout: post
 title: block笔记（三）：内存泄漏和关键字
 date: 2018-06-19 
-tags: iOS
+tags: [iOS,book]
 ---
 > 在不特殊说明是MRC的情况下，默认是ARC。
 [Objective-C Automatic Reference Counting (ARC)](http://clang.llvm.org/docs/AutomaticReferenceCounting.html)
