@@ -1,289 +1,169 @@
 ---
 layout: post
-title: block笔记（三）：内存泄漏和关键字
+title: block笔记(三)：copy 和 release
 date: 2018-06-19 
 tags: iOS
 ---
-> 在不特殊说明是MRC的情况下，默认是ARC。
-[Objective-C Automatic Reference Counting (ARC)](http://clang.llvm.org/docs/AutomaticReferenceCounting.html)
+> * 原作于：2018-01-02        
+> * GitHub Repo：[BoyangBlog](https://github.com/BiBoyang/BoyangBlog)
 
-# 怎么泄漏的
-我们知道，在ARC中，除了全局block，block都是在栈上进行创建的。使用的时候，会自动将它复制到堆中。中间会经历objc_retainBlock->_Block_copy->_Block_copy_internal方法链。换过来说，我们使用的每个拦截了自动变量的block，都会经历这写方法（注意这一点很重要）。
-通过之前的研究，了解到在 **__main_block_impl_0**中会保存着引用到的变量。在转换过的block代码中，block会强行持有拦截的外部对象，不管有没有改变过，都是会造成强引用。
+这篇文章记录 block 的 copy 和 release 过程。
 
-# __string和__weak
-## __strong
-__strong实际上是一个默认的方法。
+本文大部分内容来自[A look inside blocks: Episode 3 (Block_copy)](http://www.galloway.me.uk/2013/05/a-look-inside-blocks-episode-3-block-copy/)，只做了一部分补充。
+
+## Block_copy()
+
+这部分代码在[Block.h](https://opensource.apple.com/source/clang/clang-800.0.42.1/src/projects/compiler-rt/lib/BlocksRuntime/Block.h.auto.html)中。
+
+我们知道，在 block 创建的时候，一般来说，都是在栈上的。
+
+但是我们知道，栈是有系统自动管理的，其所属的变量作用域结束，block 就会被废弃。那该如何解决这个问题呢？
+
+答案就是将 block 从栈上复制到堆上。下面的代码就是关键代码的主要过程。
+
+```C++
+#define Block_copy(...) ((__typeof(__VA_ARGS__))_Block_copy((const void *)(__VA_ARGS__)))
+#define Block_release(...) _Block_release((const void *)(__VA_ARGS__))
 ```
-{
-    id __strong obj = [[NSObject alloc] init];
+
+Block_copy 是一个宏，它将传入的参数转换为一个 const void * 然后传递给 _Block_copy() 方法。 _Block_copy() 的实现在[runtime.c](https://opensource.apple.com/source/clang/clang-800.0.42.1/src/projects/compiler-rt/lib/BlocksRuntime/runtime.c.auto.html)：
+
+```C++
+void *_Block_copy(const void *arg) {
+    return _Block_copy_internal(arg, WANTS_ONE);
 }
 ```
-代码会被转换成这个样子
-```
-id __attribute__((objc_ownership(strong))) obj = 
-((NSObject *(*)(id, SEL))(void *)objc_msgSend)((id)((NSObject *(*)(id, SEL))(void *)objc_msgSend)((id)objc_getClass("NSObject"), 
-sel_registerName("alloc")), 
-sel_registerName("init"));
-//代码实际上只有一行，为了方便观看打了换行
-```
-抽离出来，实际上主要是这三个方法
-```
-id obj = objc_msgSend(NSObject, @selector(alloc));
-objc_msgSend(obj,selector(init));
-objc_release(obj);
-```
-也就是说，ARC下的对象，正常情况下都是__strong修饰的。
 
-##__weak
-> 这里我们要使用 **clang -rewrite-objc -fobjc-arc -stdlib=libc++ -mmacosx-version-min=10.7 -fobjc-runtime=macosx-10.7 -Wno-deprecated-declarations main.m**方法去转换为C++代码，原因是因为，__weak其实只在ARC的状态下才能使用，之前使用 **clang -rewrite-objc main.m**是直接将代码转换为C++，并不有限制。
+继续往下：
 
-声明一个__weak对象
-```
-{
-    id __weak obj = strongObj;
-}
-```
-转换之后
-```
-id __attribute__((objc_ownership(none))) obj1 = strongObj;
-```
-相应的会调用
-```
-id obj ;
-objc_initWeak(&obj,strongObj);
-objc_destoryWeak(&obj);
-```
-从名字上可以看出来，一个是创建一个是销毁。
-这里LLVM文档和objc_723文档有些许不同。我这里采用最新的objc_723代码，比之前的有优化：
-```
-id objc_initWeak(id *location, id newObj)
-{
-    // 查看对象实例是否有效
-    // 无效对象直接导致指针释放
-    if (!newObj)
-    {
-        *location = nil;
-        return nil;
-    }
+```C++
+/* Copy, or bump refcount, of a block.  If really copying, call the copy helper if present. */
+static void *_Block_copy_internal(const void *arg, const int flags) {
+    struct Block_layout *aBlock;
+    const bool wantsOne = (WANTS_ONE & flags) == WANTS_ONE;
+    //-1-. 如果传入参数是 NULL 就直接返回 NULL 。防止传入一个 NULL 的 block。
+    if (!arg) return NULL;
+    // The following would be better done as a switch statement
     
-    // 这里传递了三个 bool 数值
-    // 使用 template 进行常量参数传递是为了优化性能
-    // DontHaveOld--没有旧对象，
-    // DoHaveNew--有新对象，
-    // DoCrashIfDeallocating-- 如果newObj已经被释放了就Crash提示
-    return storeWeak<DontHaveOld, DoHaveNew, DoCrashIfDeallocating>
-        (location, (objc_object*)newObj);
-}
-~~~~~~~~~~~~~~~~
-void objc_destroyWeak(id *location)
-{
-    (void)storeWeak<DoHaveOld, DontHaveNew, DontCrashIfDeallocating>
-        (location, nil);
-}
-```
-这两个方法，最后都指向了 **storeWeak**方法，这是一个很长的方法:
-```
-// Update a weak variable.
-// If HaveOld is true, the variable has an existing value 
-//   that needs to be cleaned up. This value might be nil.
-// If HaveNew is true, there is a new value that needs to be 
-//   assigned into the variable. This value might be nil.
-// If CrashIfDeallocating is true, the process is halted if newObj is 
-//   deallocating or newObj's class does not support weak references. 
-//   If CrashIfDeallocating is false, nil is stored instead.
-// 更新weak变量.
-// 当设置HaveOld是true，即DoHaveOld，表示这个weak变量已经有值，需要被清理，这个值也有能是nil
-// 当设置HaveNew是true， 即DoHaveNew，表示有一个新值被赋值给weak变量，这个值也有能是nil
-//当设置参数CrashIfDeallocating是true，即DoCrashIfDeallocating，如果newObj已经被释放或者newObj是一个不支持弱引用的类，则暂停进程
-// deallocating或newObj的类不支持弱引用
-// 当设置参数CrashIfDeallocating是false，即DontCrashIfDeallocating，则存储nil
-
-enum CrashIfDeallocating {
-    DontCrashIfDeallocating = false, DoCrashIfDeallocating = true
-};
-template <HaveOld haveOld, HaveNew haveNew,
-          CrashIfDeallocating crashIfDeallocating>
-static id storeWeak(id *location, objc_object *newObj)
-{
-    assert(haveOld  ||  haveNew);
+    //-2-. 将参数转换为一个 struct Block_layout 类型的指针。
+    aBlock = (struct Block_layout *)arg;
     
-    // 初始化当前正在 +initialize 的类对象为nil
-    if (!haveNew) assert(newObj == nil);
-
-    Class previouslyInitializedClass = nil;
-    id oldObj;
-    
-    // 声明新旧SideTable，
-    SideTable *oldTable;
-    SideTable *newTable;
-
-    // 获得新值和旧值的锁存位置（用地址作为唯一标示）
-    // 通过地址来建立索引标志，防止桶重复
-    // 下面指向的操作会改变旧值
- retry:
-    
-    // 如果weak ptr之前弱引用过一个obj，则将这个obj所对应的SideTable取出，赋值给oldTable
-    if (haveOld)
-    {
-        oldObj = *location;
-        oldTable = &SideTables()[oldObj];
-    }
-    else
-    {
-        oldTable = nil;
-    }
-    
-    
-    if (haveNew) {
-        newTable = &SideTables()[newObj];
-    } else {
-        newTable = nil;
-    }
-
-    
-    SideTable::lockTwo<haveOld, haveNew>(oldTable, newTable);
-
-    if (haveOld  &&  *location != oldObj) {
-        SideTable::unlockTwo<haveOld, haveNew>(oldTable, newTable);
-        goto retry;
-    }
-
-    // Prevent a deadlock between the weak reference machinery
-    // and the +initialize machinery by ensuring that no 
-    // weakly-referenced object has an un-+initialized isa.
-    //通过确保没有弱引用的对象具有未初始化的 isa，防止弱引用机制和 +initialize 机制之间的死锁。
-    //在使用 **+initialized**方法的时候，因为这个方法是在alloc之前调用的。不这么做，可能会出现+initialize 中调用了 storeWeak 方法，而在 storeWeak 方法中 weak_register_no_lock 方法中用到对象的 isa 还没有初始化完成的情况。
-
-    if (haveNew  &&  newObj) {
-        // 获得新对象的 isa 指针
-        Class cls = newObj->getIsa();
-        // 判断 isa 非空且已经初始化
-        if (cls != previouslyInitializedClass  &&  
-            !((objc_class *)cls)->isInitialized()) 
-        {
-            // 解锁新旧SideTable
-            SideTable::unlockTwo<haveOld, haveNew>(oldTable, newTable);
-            _class_initialize(_class_getNonMetaClass(cls, (id)newObj));
-
-            // If this class is finished with +initialize then we're good.
-            // If this class is still running +initialize on this thread 
-            // (i.e. +initialize called storeWeak on an instance of itself)
-            // then we may proceed but it will appear initializing and 
-            // not yet initialized to the check above.
-            // Instead set previouslyInitializedClass to recognize it on retry.
-            // 如果 newObj 已经完成执行完 +initialize 是最理想情况
-            // 如果 newObj的 +initialize 仍然在线程中执行
-            // (也就是说newObj的 +initialize 正在调用 storeWeak 方法)
-            // 通过设置previousInitializedClass以在重试时识别它。
-            
-
-            previouslyInitializedClass = cls;
-
-            goto retry;
+    //-3-. 如果 block 的 flags 字段包含 BLOCK_NEEDS_FREE ，那么这是一个堆 block。这里只需要增加引用计数然后返回原 blcok。
+    if (aBlock->flags & BLOCK_NEEDS_FREE) {
+        // latches on high
+        latching_incr_int(&aBlock->flags);
+        return aBlock;
+    } else if (aBlock->flags & BLOCK_IS_GC) {
+        // GC refcounting is expensive so do most refcounting here.
+        if (wantsOne && ((latching_incr_int(&aBlock->flags) & BLOCK_REFCOUNT_MASK) == 1)) {
+            // Tell collector to hang on this - it will bump the GC refcount version
+            _Block_setHasRefcount(aBlock, true);
         }
+        return aBlock;
+    }
+    //-4-. 如果这是一个全局 block，那么不需要做任何事，直接返回原 block。因为全局block 是一个单例。
+    else if (aBlock->flags & BLOCK_IS_GLOBAL) {
+        return aBlock;
     }
 
-    // Clean up old value, if any.
-    // 清除旧值，实际上是清除旧对象weak_table中的location
-
-    if (haveOld) {
-        weak_unregister_no_lock(&oldTable->weak_table, oldObj, location);
-    }
-
-    // Assign new value, if any.
-    // 分配新值，实际上是保存location到新对象的weak_table种
-
-    if (haveNew) {
-        newObj = (objc_object *)
-            weak_register_no_lock(&newTable->weak_table, (id)newObj, location, 
-                                  crashIfDeallocating);
-        // weak_register_no_lock returns nil if weak store should be rejected
-
-        // Set is-weakly-referenced bit in refcount table.
-        // 如果弱引用被释放 weak_register_no_lock 方法返回 nil
+    // Its a stack block.  Make a copy.
+    if (!isGC) {
+    
+        //-5-. 如果走到这里，那么这一定是一个栈上分配的block。那样的话，block需要拷贝到堆上。这才是有趣的部分！第一步，调用malloc()创建一块特定的内存。如果创建失败，返回NULL；否则，继续。
+        struct Block_layout *result = malloc(aBlock->descriptor->size);
+        if (!result) return (void *)0;
         
-        // 如果新对象存在，并且没有使用TaggedPointer技术，在引用计数表中设置若引用标记位
-        if (newObj  &&  !newObj->isTaggedPointer()) {
-            // 标记新对象有weak引用，isa.weakly_referenced = true;
-            newObj->setWeaklyReferenced_nolock();
-        }
+        //-6-. 调用memmove()方法将当前栈上分配的block按位拷贝到我们刚刚创建的堆内存上。这样可以保证所有的元数据都拷贝过来，比如descriptor。
+        memmove(result, aBlock, aBlock->descriptor->size); // bitcopy first
+        // reset refcount
+        
+        //-7-. 更新标志位。第一行确保引用计数为0。注释表明这行其实不需要————大概这个时候引用计数已经是0了。我猜保留这行是因为以前有个bug导致这里的引用计数不是0（所以说runtime的代码也会偷懒）。下一行设置了BLOCK_NEEDS_FREE标志位，表明这是一个堆block，一旦引用计数减为0，它所占用的内存将被释放。|1操作设置block的引用计数为1。
 
-        // Do not set *location anywhere else. That would introduce a race.
-        // 设置location指针指向newObj
-        // 不要在其他地方设置 *location。 那会引起竞争
-        *location = (id)newObj;
+        result->flags &= ~(BLOCK_REFCOUNT_MASK);    // XXX not needed
+        result->flags |= BLOCK_NEEDS_FREE | 1;
+        
+        //-8-. block的isa指针被设置为_NSConcreteMallocBlock，说明这是个堆block。
+        result->isa = _NSConcreteMallocBlock;
+        
+        //-9-. 如果block有一个拷贝辅助函数，那么它将被调用。必要的时候编译器会生成拷贝辅助函数。比如一个捕获了对象的block就需要。那么拷贝辅助函数将持有被捕获的对象。
+        if (result->flags & BLOCK_HAS_COPY_DISPOSE) {
+            //printf("calling block copy helper %p(%p, %p)...\n", aBlock->descriptor->copy, result, aBlock);
+            (*aBlock->descriptor->copy)(result, aBlock); // do fixup
+        }
+        return result;
+    } else {
+        // Under GC want allocation with refcount 1 so we ask for "true" if wantsOne
+        // This allows the copy helper routines to make non-refcounted block copies under GC
+        unsigned long int flags = aBlock->flags;
+        bool hasCTOR = (flags & BLOCK_HAS_CTOR) != 0;
+        struct Block_layout *result = _Block_allocator(aBlock->descriptor->size, wantsOne, hasCTOR);
+        if (!result) return (void *)0;
+        memmove(result, aBlock, aBlock->descriptor->size); // bitcopy first
+        // reset refcount
+        // if we copy a malloc block to a GC block then we need to clear NEEDS_FREE.
+        flags &= ~(BLOCK_NEEDS_FREE|BLOCK_REFCOUNT_MASK);   // XXX not needed
+        if (wantsOne)
+            flags |= BLOCK_IS_GC | 1;
+        else
+            flags |= BLOCK_IS_GC;
+        result->flags = flags;
+        if (flags & BLOCK_HAS_COPY_DISPOSE) {
+            //printf("calling block copy helper...\n");
+            (*aBlock->descriptor->copy)(result, aBlock); // do fixup
+        }
+        if (hasCTOR) {
+            result->isa = _NSConcreteFinalizingBlock;
+        }
+        else {
+            result->isa = _NSConcreteAutoBlock;
+        }
+        return result;
     }
-    else {
-        // No new value. The storage is not changed.
+}
+```
+
+## Block_release()
+
+我们接着来看 **_Block_release()** 的代码。
+
+```C++
+// API entry point to release a copied Block
+void _Block_release(void *arg) {
+
+    //-1-. 首先，参数被转换为一个指向struct Block_layout的指针。如果传入NULL，直接返回。
+    struct Block_layout *aBlock = (struct Block_layout *)arg;
+    
+    //-2-. 标志位部分表示引用计数减1（之前Block_copy()中标志位操作代表的是引用计数置为1）。
+    int32_t newCount;
+    if (!aBlock) return;
+    newCount = latching_decr_int(&aBlock->flags) & BLOCK_REFCOUNT_MASK;
+    
+    //-3-. 如果新的引用计数值大于0，说明有其他东西在引用block，所以block不应该被释放。
+    if (newCount > 0) return;
+    // Hit zero
+    if (aBlock->flags & BLOCK_IS_GC) {
+        // Tell GC we no longer have our own refcounts.  GC will decr its refcount
+        // and unless someone has done a CFRetain or marked it uncollectable it will
+        // now be subject to GC reclamation.
+        _Block_setHasRefcount(aBlock, false);
     }
     
-    SideTable::unlockTwo<haveOld, haveNew>(oldTable, newTable);
+    //-4-. 否则，如果标志位包含BLOCK_NEEDS_FREE，那么表明，它既是堆block而且引用计数为0，应该被释放。首先block的处理辅助函数(dispose helper)被调用，它是拷贝辅助函数(copy helper)的反义词，执行相反的操作，比如释放被捕获的对象。最后调用_Block_deallocator方法释放block。如果你查找runtime.c你就会发现这个方法最后就是一个free的函数指针，释放malloc分配的内存。
 
-    return (id)newObj;
-}
-```
-这里不比再重复一遍weak表实现。
-简单点说，由于weak表也是用Hash table实现的，所以objc_storeWeak函数就把第一个入参的变量地址注册到weak表中，然后根据第二个入参来决定是否移除。如果第二个参数为0，那么就把__weak变量从weak表中删除记录，并从引用计数表中删除对应的键值记录。
-所以如果__weak引用的原对象如果被释放了，那么对应的__weak对象就会被指为nil。原来就是通过objc_storeWeak函数这些函数来实现的。
-
-## weakSelf和strongSelf
-
-```
-__weak __typeof(self)weakSelf = self;
-__strong __typeof(weakSelf)strongSelf = weakSelf;      
-```
-weakSelf是为了让block不去持有self，避免了循环引用，如果在Block内需要访问使用self的方法、变量，建议使用weakSelf。
-但是，这里会出现一个问题。使用weakSelf修饰的 **self.**变量，是有可能在执行的过程中就被释放的。
-以下代码为例
-```
-- (void)blockRetainCycle_1 {
-    __weak __typeof(self)weakSelf = self;
-    self.block = ^{
-        NSLog(@"%@",@[weakSelf]);
-    };
-}
-```
-我们如果直接使用这个函数，是有可能在打印之前，weakSelf就被释放了，打印出来就是会出问题。
-为了解决这个问题，我们就要用到strongSelf。
-```
-- (void)blockRetainCycle_2 {
-    __weak __typeof(self)weakSelf = self;
-    self.block = ^{
-        __strong typeof (weakSelf)strongSelf = weakSelf;
-        NSLog(@"%@",@[strongSelf]);
-    };
-}
-```
-在这里，我们使用了strongSelf，它可以保证在strongSelf下面，直到出了作用域之前，都是存在这个strongSelf的。
-但是，这里依然存在一个微小的问题：
-我们知道使用weakSelf的时候是无法保证在作用域中一直持有的。虽然使用了strongSelf，但是还是会存在微小的概率，让weakSelf在strongSelf创建之前被释放。如果是单纯的给self对象发送信息的话，这么其实问题不大，*OC的消息转发机制保证了我们即使给nil的对象发送消息也不会出现问题*。
-但是如果我们有其他的操作，比如说将self对象添加进数组中，如上面代码所示，这里就会发生crash了。
-那么我们要需要进一步的保护
-```
-- (void)blockRetainCycle_3 {
-    __weak __typeof(self)weakSelf = self;
-    self.block = ^{
-        __strong typeof (weakSelf)strongSelf = weakSelf;
-        if (strongSelf) {
-            NSLog(@"%@",@[strongSelf]);
-        }
-    };
+    else if (aBlock->flags & BLOCK_NEEDS_FREE) {
+        if (aBlock->flags & BLOCK_HAS_COPY_DISPOSE)(*aBlock->descriptor->dispose)(aBlock);
+        _Block_deallocator(aBlock);
+    }
+    //-5-. 当然，如果前面没拦住，说明这个block是一个全局block，则不用管它
+    else if (aBlock->flags & BLOCK_IS_GLOBAL) {
+        ;
+    }
+    
+    //-6-. 警告开发者是不是做了什么奇奇怪怪的事，要把栈block释放掉
+    else {
+        printf("Block_release called upon a stack Block: %p, ignored\n", (void *)aBlock);
+    }
 }
 ```
 
-#### __weak和__block的区别
-我们使用__block其实也是可能达到防止block循环引用的。
-我们可以通过在block内部把__block修饰的对象置为nil来变相地实现内存释放。
-从内存上来讲，__block会持有该对象，即使超出了该对象的作用域，该对象还是会存在的，知道block对象从堆上销毁；而__weak是把该对象赋值给weak对象，如果对象被销毁，weak对象将变成nil。
-另外，__block对象可以让block修改局部变量。
 
-
-
-#### 关键字
-我们通过之前的文章知道，在ARC当中，一般的block会从栈被copy到堆中。
-但是如果使用weak呢？（assign就不讨论了）
-系统会告知我们 **Assigning block literal to a weak property; object will be released after assignment**。
-而在ARC下要使用什么关键字呢？
-strong和copy都是可以的。
-之前我们知道，在ARC中，block会自动从栈被复制到堆中，这个copy是自动了，即使使用strong还是依然会有copy操作。

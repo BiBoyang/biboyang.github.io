@@ -1,675 +1,341 @@
 ---
 layout: post
-title: property的研究（二）：weak关键字
+title: property的研究（二）：nonatomic & atomic
 date: 2018-07-28 
 tags: iOS
 ---
 
 
-# @property属性相关（二）：weak
-## weak的实现
-我们这里直接查看[	objc4-723.tar.gz](https://opensource.apple.com/tarballs/objc4/)源码。
-节省点话说，可以分为以下三步：
-1、初始化时：runtime会调用**objc_initWeak**函数，初始化一个新的weak指针指向对象的地址。
-2、添加引用时：**objc_initWeak**函数会调用 **objc_storeWeak()** 函数， **objc_storeWeak()** 的作用是更新指针指向，创建对应的弱引用表。
-3、释放时，调用**clearDeallocating**函数。**clearDeallocating**函数首先根据对象地址获取所有weak指针地址的数组，然后遍历这个数组把其中的数据设为nil，最后把这个entry从weak表中删除，最后清理对象的记录。
+# @property 原理（二）：nonatomic & atomic
 
+atomic 一般会被翻译成原子性。它表示一个”不可再分割“的单元，也就是**单指令操作**。
 
-## 实现过程
-当有一个weak的属性时。编译器会自动创建一下方法
+话说回来，现在原子已经并非是不可分割的，但是提出这个概念的时候，并非如此，所以就直接简单的等价于**不可分割**，就可以了，和物理学没什么关系。所以在下面的内容里，不会直接使用原子性，而是直接用 atomic 来说明。
 
-```
-objc_initWeak(&obj1,obj);//初始化
-objc_destroyWeak(&obj1);//释放
-```
-在**NSObject.mm**文件中，找到方法的实现
+从某种意义上来讲，线程安全的元素是，它本身就是 atomic 的。
 
-```
-id objc_initWeak(id *location, id newObj)
-{
-    // 查看对象实例是否有效
-    // 无效对象直接导致指针释放
-    if (!newObj)
-    {
-        *location = nil;
-        return nil;
-    }
-    
-    // 这里传递了三个 bool 数值
-    // 使用 template 进行常量参数传递是为了优化性能
-    // DontHaveOld--没有旧对象，
-    // DoHaveNew--有新对象，
-    // DoCrashIfDeallocating-- 如果newObj已经被释放了就Crash提示
-    return storeWeak<DontHaveOld, DoHaveNew, DoCrashIfDeallocating>
-        (location, (objc_object*)newObj);
-}
-```
-**注：这里的实现代码是最新版的，但是即使是倒数第二版和这里稍有不同，不过并不影响读取，新版做了性能的优化。**
+# iOS 中的 atomic
 
-这里方法比较简单明了，但是我们要知道这里有一个潜在的前提条件：
-> location要是一个没有被注册为__weak对象的有效指针。如果newObj是空指针或它指向的对象已经释放，则location也就是weak的指针将初始化为0（nil）。 否则，将object注册为指向location的__weak对象。 
-这里是表层的判断，我们继续往下看相关实现
+在我们日常的使用过程中，我们经常是使用 nonatomic 的，很少使用 atomic，这个主要是因为 atomic 本身就一些缺陷，但是并非不能使用，在某些情况下，使用 atomic 反而是某种较优解。
 
-```
-// 更新weak变量.
-// 当设置HaveOld是true，即DoHaveOld，表示这个weak变量已经有值，需要被清理，这个值也有能是nil
-// 当设置HaveNew是true， 即DoHaveNew，表示有一个新值被赋值给weak变量，这个值也有能是nil
-//当设置参数CrashIfDeallocating是true，即DoCrashIfDeallocating，如果newObj已经被释放或者newObj是一个不支持弱引用的类，则暂停进程
-// deallocating或newObj的类不支持弱引用
-// 当设置参数CrashIfDeallocating是false，即DontCrashIfDeallocating，则存储nil
+在上一篇文章中，我们知道在 set 后会调用 **reallySetProperty** 方法，get 后会调用 **objc_getProperty** 方法，我们找到它们的关键代码。慢慢看下去。
 
-enum CrashIfDeallocating {
-    DontCrashIfDeallocating = false, DoCrashIfDeallocating = true
-};
-template <HaveOld haveOld, HaveNew haveNew,
-          CrashIfDeallocating crashIfDeallocating>
-static id 
-storeWeak(id *location, objc_object *newObj)
-{
-    assert(haveOld  ||  haveNew);
-    
-    // 初始化当前正在 +initialize 的类对象为nil
-    if (!haveNew) assert(newObj == nil);
-
-    Class previouslyInitializedClass = nil;
-    id oldObj;
-    
-    // 声明新旧SideTable，
-    SideTable *oldTable;
-    SideTable *newTable;
-
-    // Acquire locks for old and new values.
-    // Order by lock address to prevent lock ordering problems. 
-    // Retry if the old value changes underneath us.
- retry:   
-    // 如果weak ptr之前弱引用过一个obj，则将这个obj所对应的SideTable取出，赋值给oldTable
-    if (haveOld) {
-        oldObj = *location;
-        oldTable = &SideTables()[oldObj];
-    } else {
-        oldTable = nil;
-    }
-    if (haveNew) {
-        newTable = &SideTables()[newObj];
-    } else {
-        newTable = nil;
-    }
-
-    SideTable::lockTwo<haveOld, haveNew>(oldTable, newTable);
-
-    if (haveOld  &&  *location != oldObj) {
-        SideTable::unlockTwo<haveOld, haveNew>(oldTable, newTable);
-        goto retry;
-    }
-
-    // Prevent a deadlock between the weak reference machinery
-    // and the +initialize machinery by ensuring that no 
-    // weakly-referenced object has an un-+initialized isa.
-    //通过确保没有弱引用的对象具有未初始化的 isa，防止弱引用机制和 +initialize 机制之间的死锁。
-//// -1-
-    if (haveNew  &&  newObj) {
-        // 获得新对象的 isa 指针
-        Class cls = newObj->getIsa();
-        // 判断 isa 非空且已经初始化
-        if (cls != previouslyInitializedClass  &&  
-            !((objc_class *)cls)->isInitialized()) 
-        {
-            // 解锁新旧SideTable
-            SideTable::unlockTwo<haveOld, haveNew>(oldTable, newTable);
-            _class_initialize(_class_getNonMetaClass(cls, (id)newObj));
-
-            // If this class is finished with +initialize then we're good.
-            // If this class is still running +initialize on this thread 
-            // (i.e. +initialize called storeWeak on an instance of itself)
-            // then we may proceed but it will appear initializing and 
-            // not yet initialized to the check above.
-            // Instead set previouslyInitializedClass to recognize it on retry.
-            // 如果 newObj 已经完成执行完 +initialize 是最理想情况
-            // 如果 newObj的 +initialize 仍然在线程中执行
-            // (也就是说newObj的 +initialize 正在调用 storeWeak 方法)
-            // 通过设置previousInitializedClass以在重试时识别它。
-            
-
-            previouslyInitializedClass = cls;
-
-            goto retry;
-        }
-    }
-
-    // Clean up old value, if any.
-    // 清除旧值，实际上是清除旧对象weak_table中的location
-
-    if (haveOld) {
-        weak_unregister_no_lock(&oldTable->weak_table, oldObj, location);
-    }
-
-    // Assign new value, if any.
-    // 分配新值，实际上是保存location到新对象的weak_table种
-
-    if (haveNew) {
-        newObj = (objc_object *)
-            weak_register_no_lock(&newTable->weak_table, (id)newObj, location, 
-                                  crashIfDeallocating);
-        // weak_register_no_lock returns nil if weak store should be rejected
-
-        // Set is-weakly-referenced bit in refcount table.
-        // 如果弱引用被释放 weak_register_no_lock 方法返回 nil
+```C++
+objc_getProperty
+······
+    // >> 如果是非原子性操作，直接返回属性的对象指针
+    if (!atomic) return *slot;
         
-        // 如果新对象存在，并且没有使用TaggedPointer技术，在引用计数表中设置若引用标记位
-        if (newObj  &&  !newObj->isTaggedPointer()) {
-            // 标记新对象有weak引用，isa.weakly_referenced = true;
-            newObj->setWeaklyReferenced_nolock();
-        }
-
-        // Do not set *location anywhere else. That would introduce a race.
-        // 设置location指针指向newObj
-        // 不要在其他地方设置 *location。 那会引起竞争
-        *location = (id)newObj;
+    // Atomic retain release world
+    spinlock_t& slotlock = PropertyLocks[slot];
+    slotlock.lock();
+    id value = objc_retain(*slot);
+    slotlock.unlock();
+    return objc_autoreleaseReturnValue(value);
+······
+reallySetProperty
+······
+if (!atomic) {
+        // >> 非原子操作，将slot指针指向的对象引用赋值给oldValue
+        oldValue = *slot;
+        // >> slot指针指向newValue，完成赋值操作
+        *slot = newValue;
+    } else {
+        // >> 原子操作，则获取锁
+        spinlock_t& slotlock = PropertyLocks[slot];
+        slotlock.lock();//加锁
+        oldValue = *slot;//将slot指针指向的对象引用赋值给oldValue
+        *slot = newValue;//将slot指针指向newValue，完成赋值操作
+        slotlock.unlock();//解锁
     }
-    else {
-        // No new value. The storage is not changed.
-    }
-    
-    SideTable::unlockTwo<haveOld, haveNew>(oldTable, newTable);
-
-    return (id)newObj;
-}
 ```
-这个函数的作用是在添加引用的时候，添加新的指针和创建对应的弱引用表。
-> -1- 这里有关initialize方法的问题.
-在使用 **+initialized**方法的时候，因为这个方法是在alloc之前调用的。不这么做，可能会出现+initialize 中调用了 storeWeak 方法，而在 storeWeak 方法中 weak_register_no_lock 方法中用到对象的 isa 还没有初始化完成的情况。
+
+这里，我们会发现，atomic 和 nonatomic 在实现上的区别，在于 set 和 get 操作的时候，是否添加了锁；以及在 get 过程中，atomic 修饰的属性，会将对象注册到自动释放池中，自动管理。
+
+继续探究锁的实现。
+
+## StripedMap
+
+**PropertyLocks** 是一个 **StripedMap<spinlock_t>** 类型的全局变量,而**StripedMap** 是一个 **hashMap**，key 是指针，value 是 spinlock_t 对象。
 
 
-
-这里有几个关键方法，需要说明一下。
-#### SideTable
-这个是一个结构体。
-
+```C++
+StripedMap<spinlock_t> PropertyLocks;
 ```
-enum HaveOld { DontHaveOld = false, DoHaveOld = true };
-enum HaveNew { DontHaveNew = false, DoHaveNew = true };
 
-struct SideTable {
-    //原子操作自旋锁
-    spinlock_t slock;
-    // 引用计数的 hash 表
-    RefcountMap refcnts;
-    // weak 引用全局 hash 表
-    weak_table_t weak_table;
+StripedMap 是一个 hashMap，如下所示：
+```C++
+enum { CacheLineSize = 64 };
 
-    SideTable() {
-        memset(&weak_table, 0, sizeof(weak_table));
-    }
+// StripedMap<T> is a map of void* -> T, sized appropriately 
+// for cache-friendly lock striping. 
+// For example, this may be used as StripedMap<spinlock_t>
+// or as StripedMap<SomeStruct> where SomeStruct stores a spin lock.
+template<typename T>
+class StripedMap {
+#if TARGET_OS_IPHONE && !TARGET_OS_SIMULATOR
+    enum { StripeCount = 8 };
+#else
+    enum { StripeCount = 64 };
+#endif
 
-    ~SideTable() {
-        _objc_fatal("Do not delete SideTable.");
-    }
-
-    void lock() { slock.lock(); }
-    void unlock() { slock.unlock(); }
-    void forceReset() { slock.forceReset(); }
-
-    // Address-ordered lock discipline for a pair of side tables.
-
-    template<HaveOld, HaveNew>
-    static void lockTwo(SideTable *lock1, SideTable *lock2);
-    template<HaveOld, HaveNew>
-    static void unlockTwo(SideTable *lock1, SideTable *lock2);
-};
-```
-这里面第一个是为了防止竞争选择的自旋锁，第二个是协助对象的 isa 指针的 extra_rc 共同引用计数的变量，第三个就是我们要了解的关键，一个weak引用的hash表。
-```
-struct weak_table_t {
-    // 保存了所有指向指定对象的 weak 指针
-    weak_entry_t *weak_entries;
-    // 存储空间
-    size_t    num_entries;
-    // 参与判断引用计数辅助量
-    uintptr_t mask;
-    // hash key 最大偏移值
-    uintptr_t max_hash_displacement;
-};
-```
-这里的最大偏移量，是因为苹果创建的hash表使用的是开放寻址法中的线性探测法，元素默认会有偏移，用max_hash_displacement来记录写入元素时候所经过的最大偏移量和读取元素的时候所经历的最大偏移量,当读取的hash_displacement大于写入时候的max_hash_displacement的时候就会抛出错误.
-
-
-我们继续往下看
-
-```
-/**
- * The internal structure stored in the weak references table.
- //存储在弱引用表中的内部结构
- * It maintains and stores
- 用来维护和存储
- * a hash set of weak references pointing to an object.
- 指向对象的弱引用的哈希集
- * If out_of_line_ness != REFERRERS_OUT_OF_LINE then the set
- * is instead a small inline array.
-  如果out_of_line_ness 不等于REFERRERS_OUT_OF_LINE，然后这个集合会被一个小的内联数组替代。
- */
-#define WEAK_INLINE_COUNT 4
-
-// out_of_line_ness field overlaps with the low two bits of inline_referrers[1].
-//out_of_line_ness 的字段与低两位的inline_referrers[1]部分重叠
-// inline_referrers[1] is a DisguisedPtr of a pointer-aligned address.
-// inline_referrers[1]是一个指针对齐地址的DisguisedPtr
-// The low two bits of a pointer-aligned DisguisedPtr will always be 0b00
-// (disguised nil or 0x80..00) or 0b11 (any other address).
-// 一个指针对齐地址的DisguisedPtr的低两位将地址将会变成 0b00（伪装的nil）或者0b11.
-// Therefore out_of_line_ness == 0b10 is used to mark the out-of-line state.
-// 因此out_of_line_ness == 0b10 被用于标记离线状态。
-#define REFERRERS_OUT_OF_LINE 2
-
-struct weak_entry_t {
-    DisguisedPtr<objc_object> referent;
-    union {
-        struct {
-            weak_referrer_t *referrers;
-            uintptr_t        out_of_line_ness : 2;
-            uintptr_t        num_refs : PTR_MINUS_2;
-            uintptr_t        mask;
-            uintptr_t        max_hash_displacement;
-        };
-        struct {
-            // out_of_line_ness field is low bits of inline_referrers[1]
-            weak_referrer_t  inline_referrers[WEAK_INLINE_COUNT];
-        };
+    struct PaddedT {
+        // >> alignas是字节对齐的意思，表示让数组中每一个元素的起始位置对齐到64的倍数
+        T value alignas(CacheLineSize);
     };
 
-    bool out_of_line() {
-        return (out_of_line_ness == REFERRERS_OUT_OF_LINE);
+    PaddedT array[StripeCount];
+
+    // hash 函数
+    static unsigned int indexForPointer(const void *p) {
+        uintptr_t addr = reinterpret_cast<uintptr_t>(p);
+        return ((addr >> 4) ^ (addr >> 9)) % StripeCount;
     }
 
-    weak_entry_t& operator=(const weak_entry_t& other) {
-        memcpy(this, &other, sizeof(other));
-        return *this;
+ public:
+    T& operator[] (const void *p) { 
+        return array[indexForPointer(p)].value; 
+    }
+    const T& operator[] (const void *p) const { 
+        return const_cast<StripedMap<T>>(this)[p]; 
     }
 
-    weak_entry_t(objc_object *newReferent, objc_object **newReferrer)
-        : referent(newReferent)
-    {
-        inline_referrers[0] = newReferrer;
-        for (int i = 1; i < WEAK_INLINE_COUNT; i++) {
-            inline_referrers[i] = nil;
+    // Shortcuts for StripedMaps of locks.
+    void lockAll() {
+        for (unsigned int i = 0; i < StripeCount; i++) {
+            array[i].value.lock();
         }
     }
+
+    void unlockAll() {
+        for (unsigned int i = 0; i < StripeCount; i++) {
+            array[i].value.unlock();
+        }
+    }
+
+    void forceResetAll() {
+        for (unsigned int i = 0; i < StripeCount; i++) {
+            array[i].value.forceReset();
+        }
+    }
+
+    void defineLockOrder() {
+        for (unsigned int i = 1; i < StripeCount; i++) {
+            lockdebug_lock_precedes_lock(&array[i-1].value, &array[i].value);
+        }
+    }
+
+    void precedeLock(const void *newlock) {
+        // assumes defineLockOrder is also called
+        lockdebug_lock_precedes_lock(&array[StripeCount-1].value, newlock);
+    }
+
+    void succeedLock(const void *oldlock) {
+        // assumes defineLockOrder is also called
+        lockdebug_lock_precedes_lock(oldlock, &array[0].value);
+    }
+
+    const void *getLock(int i) {
+        if (i < StripeCount) return &array[i].value;
+        else return nil;
+    }
+    
+#if DEBUG
+    StripedMap() {
+        // Verify alignment expectations.
+        uintptr_t base = (uintptr_t)&array[0].value;
+        uintptr_t delta = (uintptr_t)&array[1].value - base;
+        assert(delta % CacheLineSize == 0);
+        assert(base % CacheLineSize == 0);
+    }
+#else
+    constexpr StripedMap() {}
+#endif
 };
 ```
-<!-- 弱表是由单个自旋锁控制的哈希表。一个被分配的内存块，大多数是一个对象，但是在GC之下，任何这样的分配，可以是它的地址存储一个弱引用存储单元中，通过使用编译器生成的写屏障或手工编码的寄存器弱原语的使用。-->
- 与注册相关联是一个回调块，应对这种情况：其中一个被分配的内存块被回收。该表在分配内存的地址上被哈希。当弱引用标记内存改变它的引用，我们可以查看之前的引用。
- 因此，在哈希表中，由弱引用项索引的是当前存储该地址的所有位置的列表。
- 对于ARC，我们还跟踪是否存在一个任意被解除分配的对象，在调用dealloc之前将其简单地放置在表中，以及在内存回收之前释放objc_clear_deallocating。
- 
- 我们在上边的代码中可以发现有两个 **weak_referrer_t**，第一个应该是我们正常情况下的weak表，第二个我有点没看明白，但是根据上下文，猜测可能是一个补充，在当前弱引用对象少于2个的时候，不在采用hash了，直接用数组去实现的。
- 这里确实有点难懂。
- 里面还有些细节比如bad_weak_table神马的，有时间继续往下研究。要好好补一补数据结构的知识了。
- 这里直接那冬瓜的图片来总结SideTable。
- ![](http://7xwh85.com1.z0.glb.clouddn.com/sidetable.png)
- 里面还有旧对象解除注册操作 weak_unregister_no_lock和新对象添加注册操作 weak_register_no_lock。
+我们查看注释，
+* StripedMap<T> is a map of void* -> T, sized appropriately for cache-friendly lock striping. 
+* StripedMap<T> 是一个 key 是 void*，value 是 T 的表，对于缓存友好的锁分条大小适中。
 
- ```
- id 
-weak_register_no_lock(weak_table_t *weak_table, id referent_id, 
-                      id *referrer_id, bool crashIfDeallocating)
-{
-    objc_object *referent = (objc_object *)referent_id;
-    objc_object **referrer = (objc_object **)referrer_id;
+StripedMap<T> 是一个模板类，根据传递的实际参数决定其中 array 成员存储的元素类型。 能通过对象的地址，运算出 Hash 值，通过该 hash 值找到对应的 value 。
 
-    if (!referent  ||  referent->isTaggedPointer()) return referent_id;
+这里的 CacheLineSize 显然代表的时候用于缓存的 value 大小，使用 alignas 让字节对齐；而 StripeCount 则表示在 iPhone 中，创建的 array 大小是 8 。
 
-    // ensure that the referenced object is viable
-    bool deallocating;
-    if (!referent->ISA()->hasCustomRR()) {
-        deallocating = referent->rootIsDeallocating();
-    }
-    else {
-        BOOL (*allowsWeakReference)(objc_object *, SEL) = 
-            (BOOL(*)(objc_object *, SEL))
-            object_getMethodImplementation((id)referent, 
-                                           SEL_allowsWeakReference);
-        if ((IMP)allowsWeakReference == _objc_msgForward) {
-            return nil;
-        }
-        deallocating =
-            ! (*allowsWeakReference)(referent, SEL_allowsWeakReference);
+## spinlock_t
+
+它被指定了别名
+```C++
+using spinlock_t = mutex_tt<LOCKDEBUG>;// >> 指定别名
+```
+然后找到 mutex_tt
+```C++
+template <bool Debug>
+class mutex_tt : nocopy_t {
+    os_unfair_lock mLock;
+ public:
+    constexpr mutex_tt() : mLock(OS_UNFAIR_LOCK_INIT) {
+        lockdebug_remember_mutex(this);
     }
 
-    if (deallocating) {
-        if (crashIfDeallocating) {
-            _objc_fatal("Cannot form weak reference to instance (%p) of "
-                        "class %s. It is possible that this object was "
-                        "over-released, or is in the process of deallocation.",
-                        (void*)referent, object_getClassName((id)referent));
+    constexpr mutex_tt(const fork_unsafe_lock_t unsafe) : mLock(OS_UNFAIR_LOCK_INIT) { }
+
+    void lock() {
+        lockdebug_mutex_lock(this);
+
+        os_unfair_lock_lock_with_options_inline
+            (&mLock, OS_UNFAIR_LOCK_DATA_SYNCHRONIZATION);
+    }
+
+    void unlock() {
+        lockdebug_mutex_unlock(this);
+
+        os_unfair_lock_unlock_inline(&mLock);
+    }
+
+    void forceReset() {
+        lockdebug_mutex_unlock(this);
+
+        bzero(&mLock, sizeof(mLock));
+        mLock = os_unfair_lock OS_UNFAIR_LOCK_INIT;
+    }
+
+    void assertLocked() {
+        lockdebug_mutex_assert_locked(this);
+    }
+
+    void assertUnlocked() {
+        lockdebug_mutex_assert_unlocked(this);
+    }
+
+
+    // Address-ordered lock discipline for a pair of locks.
+
+    static void lockTwo(mutex_tt *lock1, mutex_tt *lock2) {
+        if (lock1 < lock2) {
+            lock1->lock();
+            lock2->lock();
         } else {
-            return nil;
+            lock2->lock();
+            if (lock2 != lock1) lock1->lock(); 
         }
     }
 
-    // now remember it and where it is being stored
-    weak_entry_t *entry;
-    if ((entry = weak_entry_for_referent(weak_table, referent))) {
-        append_referrer(entry, referrer);
+    static void unlockTwo(mutex_tt *lock1, mutex_tt *lock2) {
+        lock1->unlock();
+        if (lock2 != lock1) lock2->unlock();
+    }
+
+    // Scoped lock and unlock
+    class locker : nocopy_t {
+        mutex_tt& lock;
+    public:
+        locker(mutex_tt& newLock) 
+            : lock(newLock) { lock.lock(); }
+        ~locker() { lock.unlock(); }
+    };
+
+    // Either scoped lock and unlock, or NOP.
+    class conditional_locker : nocopy_t {
+        mutex_tt& lock;
+        bool didLock;
+    public:
+        conditional_locker(mutex_tt& newLock, bool shouldLock)
+            : lock(newLock), didLock(shouldLock)
+        {
+            if (shouldLock) lock.lock();
+        }
+        ~conditional_locker() { if (didLock) lock.unlock(); }
+    };
+};
+```
+这里就很有意思了！我之前一直看各种博文，一直认为 atomic 是自旋锁，但是点进去一看，居然是 mute 互斥锁了。它实际上使用的是一种叫做 os_unfair_lock 的底层锁。
+
+我们一层一层的翻下去，直到 os/lock.h 文件，里面展示了 os_unfair_lock 的实现。关键的是有一段注释：
+
+>  Low-level lock that allows waiters to block efficiently on contention.
+
+> In general, higher level synchronization primitives such as those provided by the pthread or dispatch subsystems should be preferred.
+
+> The values stored in the lock should be considered opaque and implementation defined, they contain thread ownership information that the system may use to attempt to resolve priority inversions.
+
+> This lock must be unlocked from the same thread that locked it, attempts to unlock from a different thread will cause an assertion aborting the process.
+
+> This lock must not be accessed from multiple processes or threads via shared or multiply-mapped memory, the lock implementation relies on the address of the lock value and owning process.
+
+> Must be initialized with OS_UNFAIR_LOCK_INIT
+ 
+> @discussion
+
+> Replacement for the deprecated OSSpinLock. Does not spin on contention but waits in the kernel to be woken up by an unlock.
+
+> As with OSSpinLock there is no attempt at fairness or lock ordering, e.g. an unlocker can potentially immediately reacquire the lock before a woken up waiter gets an opportunity to attempt to acquire the lock. This may be advantageous for performance reasons, but also makes starvation of waiters a possibility.
+
+> 低等级的锁，允许等待者在竞争中高效的阻挡。
+> 一般来说，应该首选更高级别的同步原语，如pthread或dispatch子系统提供的同步原语。 
+> 存储在锁中的值应该被视为不透明的，并且应该定义实现，它们包含系统可能用来解决优先级反转的线程所有权信息。 
+> 此锁解锁，必须从锁定它的同一线程，尝试从其他线程解除锁定将导致断言中止进程。 
+> 不能通过共享或多重映射内存从多个进程或线程访问此锁，锁的实现依赖于锁值和所属进程的地址。
+> 必须使用 OS_UNFAIR_LOCK_INIT 初始化
+> 替换已弃用的OSSpinLock。不会在争用时旋转，而是在内核中等待解锁唤醒。
+> 与OSSpinLock一样，不存在公平性或锁排序的尝试，例如，在被叫醒的等待者有机会尝试获取锁之前，解锁器可能会立即重新获取锁。这可能有利于性能的原因，但也增加等待者饥饿的一点可能。
+
+看到这段话，我立刻想起了[不再安全的 OSSpinLock](https://blog.ibireme.com/2016/01/16/spinlock_is_unsafe_in_ios/) 这篇文章。里面写明了，因为自旋锁的优先级反转问题，使自旋锁被弃用，这样一来一切都说的通了。目前 atomic 使用的是**互斥锁**。
+
+
+# 自旋锁和互斥锁的区别
+自旋锁是一种 busy-waiting 类型的锁，如果别的线程一直持有这个锁，在本线程上，就会一直处于 busy 状态，一直在循环的请求锁，当然这时候也是在消耗 CPU。
+
+有时候，我们没有必要一直去尝试加锁，可以在抢锁失败之后，只要锁的状态没有改变，那么就不去管它；其他线程的锁的状态一旦改变，操作系统会进行通知，这样就叫做互斥锁。这里涉及到了线程的上下文切换，所以操作花销相对的多一些。
+
+自旋锁因为在未获得锁的时候不断的进行请求。而互斥锁则算的上一劳永逸，等到锁好了再开始。
+所以，如果当前的操作比较小，持有锁的时间短，就可以使用自旋锁；而如果一旦持有锁的时间长，耗费的 CPU 时间已经比线程调度要多的时候，就可以使用互斥锁。
+
+
+# 并不安全的 atomic
+认真的说，atmoic 的所谓的线程安全，其实只是针对修饰的对象的**读/写**操作，如果一个线程在对它进行 setter/getter 操作，其他的线程就需要等待。
+
+但是如果将它添加到另外一个线程，或者在另外的线程调用了 release 方法，那么就会出问题，因为 release 方法本身就不受 getter/setter 操作的限制。
+
+# 实际场景
+
+看起来，atomic 好像完全没什么用了，但是其实 atomic 单纯的作为锁来使用，性能还算不错，但是只能**对读写操作**进行使用，我们依然可以在某些情况下使用它。
+
+我曾经接收过一个老项目，项目里有一个集中展示其他人头像的页面，在这个页面，检测平台会上报几个 crash，而且版本分部很均匀，使用的版本库还是手动引入的 SDWebImage，版本推测是 3.8。
+
+具体的堆栈我没有记录，崩溃的点是在 SDWebImageDownloaderOperation 方法上，是一个 EXC_BAD_ACCESS 错误。
+
+当时想了很久，还是百思不得其解，然后询问了几个朋友，才发现这个 crash 的原因。
+
+```C++
+objc_getProperty
+······
+    //  >> 如果是非原子性操作，直接返回属性的对象指针
+    if (!atomic) return *slot;
+    ······
+reallySetProperty
+······
+if (!atomic) {
+        // >> 非原子操作，将slot指针指向的对象引用赋值给oldValue
+        oldValue = *slot;
+        // >> slot指针指向newValue，完成赋值操作
+        *slot = newValue;
     } 
-    else {
-        weak_entry_t new_entry(referent, referrer);
-        weak_grow_maybe(weak_table);
-        weak_entry_insert(weak_table, &new_entry);
-    }
-
-    // Do not set *referrer. objc_storeWeak() requires that the 
-    // value not change.
-
-    return referent_id;
-}
-------------
-id weak_register_no_lock(weak_table_t *weak_table, id referent_id, 
-                      id *referrer_id, bool crashIfDeallocating)
-{
-    objc_object *referent = (objc_object *)referent_id;
-    objc_object **referrer = (objc_object **)referrer_id;
-
-    if (!referent  ||  referent->isTaggedPointer()) return referent_id;
-
-    // ensure that the referenced object is viable
-    bool deallocating;
-    if (!referent->ISA()->hasCustomRR()) {
-        deallocating = referent->rootIsDeallocating();
-    }
-    else {
-        BOOL (*allowsWeakReference)(objc_object *, SEL) = 
-            (BOOL(*)(objc_object *, SEL))
-            object_getMethodImplementation((id)referent, 
-                                           SEL_allowsWeakReference);
-        if ((IMP)allowsWeakReference == _objc_msgForward) {
-            return nil;
-        }
-        deallocating =
-            ! (*allowsWeakReference)(referent, SEL_allowsWeakReference);
-    }
-
-    if (deallocating) {
-        if (crashIfDeallocating) {
-            _objc_fatal("Cannot form weak reference to instance (%p) of "
-                        "class %s. It is possible that this object was "
-                        "over-released, or is in the process of deallocation.",
-                        (void*)referent, object_getClassName((id)referent));
-        } else {
-            return nil;
-        }
-    }
-
-    // now remember it and where it is being stored
-    weak_entry_t *entry;
-    if ((entry = weak_entry_for_referent(weak_table, referent))) {
-        append_referrer(entry, referrer);
-    } 
-    else {
-        weak_entry_t new_entry(referent, referrer);
-        weak_grow_maybe(weak_table);
-        weak_entry_insert(weak_table, &new_entry);
-    }
-
-    // Do not set *referrer. objc_storeWeak() requires that the 
-    // value not change.
-
-    return referent_id;
-}
- ```
- 创建流程如下。
- ![](http://7xwh85.com1.z0.glb.clouddn.com/weaktable-2.png)
- 
-## hash表的动态调整 
-我们知道，理想的hash表的性能是有所有查找的性能最高的，但是理想毕竟是理想。在hash表中元素过多的时候，我们需要及时的扩容来提升性能。（尤其是开发地址法！）
- 
- 这里有一个 **append_referrer**函数
-
-```
- static void append_referrer(weak_entry_t *entry, objc_object **new_referrer) {
-    if (! entry->out_of_line()) {
-        // Try to insert inline.
-        for (size_t i = 0; i < WEAK_INLINE_COUNT; i++) {
-            if (entry->inline_referrers[i] == nil) {
-                entry->inline_referrers[i] = new_referrer;
-                return;
-            }
-        }
-        // Couldn't insert inline. Allocate out of line.
-        weak_referrer_t *new_referrers = (weak_referrer_t *)
-            calloc(WEAK_INLINE_COUNT, sizeof(weak_referrer_t));
-        // This constructed table is invalid, but grow_refs_and_insert
-        // will fix it and rehash it.
-        for (size_t i = 0; i < WEAK_INLINE_COUNT; i++) {
-            new_referrers[i] = entry->inline_referrers[i];
-        }
-        entry->referrers = new_referrers;
-        entry->num_refs = WEAK_INLINE_COUNT;
-        entry->out_of_line_ness = REFERRERS_OUT_OF_LINE;
-        entry->mask = WEAK_INLINE_COUNT-1;
-        entry->max_hash_displacement = 0;
-    }
-  
-  
-    assert(entry->out_of_line());
-    if (entry->num_refs >= TABLE_SIZE(entry) * 3/4) {
-        return grow_refs_and_insert(entry, new_referrer);
-    }
-    size_t begin = w_hash_pointer(new_referrer) & (entry->mask);
-    size_t index = begin;
-    size_t hash_displacement = 0;
-    while (entry->referrers[index] != nil) {
-        hash_displacement++;
-        index = (index+1) & entry->mask;
-        if (index == begin) bad_weak_table(entry);
-    }
-    if (hash_displacement > entry->max_hash_displacement) {
-        entry->max_hash_displacement = hash_displacement;
-    }
-    weak_referrer_t &ref = entry->referrers[index];
-    ref = new_referrer;
-    entry->num_refs++;
-}
-
+objc_release(oldValue);
 ```
 
- 
-这里的关键代码在于，标明了，weak的hash表，会在使用率在75%的时候进行扩充。扩充的方法是很简单的copy法。
-了 
+直接看这段代码，会发现，nonatomic 修饰的对象，它如果先进行 getter 操作，但是没有完成，这个时候进行 setter，会将 oldValue 进行 release 操作；然后 getter 操作继续进行，使用到的是已经执行完 release 操作的 oldValue，就会发生 EXC_BAD_ACCESS。
 
-```
- __attribute__((noinline, used))
-static void grow_refs_and_insert(weak_entry_t *entry, 
-                                 objc_object **new_referrer)
-{
-    assert(entry->out_of_line());
-    size_t old_size = TABLE_SIZE(entry);
-    size_t new_size = old_size ? old_size * 2 : 8;
-    size_t num_refs = entry->num_refs;
-    weak_referrer_t *old_refs = entry->referrers;
-    entry->mask = new_size - 1;
-    
-    entry->referrers = (weak_referrer_t *)
-        calloc(TABLE_SIZE(entry), sizeof(weak_referrer_t));
-    entry->num_refs = 0;
-    entry->max_hash_displacement = 0;
-    
-    for (size_t i = 0; i < old_size && num_refs > 0; i++) {
-        if (old_refs[i] != nil) {
-            append_referrer(entry, old_refs[i]);
-            num_refs--;
-        }
-    }
-    // Insert
-    append_referrer(entry, new_referrer);
-    if (old_refs) free(old_refs);
-}
+这里有个最简单的修改方法，是直接使用 atomic 进行修饰，替换掉 nonatomic 。在新的版本里，就再也没有报这个错误了。
 
-```
+当然，实际上最安全的方式是将 SDWebImage 的版本进行更新，这个问题已经在 4.2 版本进行了修复。
 
-扩充一个容量是原来两倍的新hash表，并将老hash表的元素插入到新的hash表中。
- 那么既然有扩充，也势必会有缩小。如果hash表中内容过少，我们就应该及时的缩小这个hash表，以免空间的浪费。
-
-
-```
- static void weak_compact_maybe(weak_table_t *weak_table)
-{
-    size_t old_size = TABLE_SIZE(weak_table);
-    // Shrink if larger than 1024 buckets and at most 1/16 full.
-    if (old_size >= 1024  && old_size / 16 >= weak_table->num_entries) {
-        weak_resize(weak_table, old_size / 8);
-        // leaves new table no more than 1/2 full
-    }
-}
- 
-```
-如果空间使用率小于1/16的时候，就会把空间缩小为原有的1/8。
- 
-## 销毁过程
-释放对象的时候，基本流程如下
->1、调用objc_release
-2、因为对象的引用计数为0，所以执行dealloc
-3、_objc_rootDealloc
-4、object_dispose
-5、objc_destructInstance
-6、objc_clear_deallocating
-
-objc_destructInstance方法
-
-```
-void *objc_destructInstance(id obj) 
-{
-    if (obj) {
-        Class isa = obj->getIsa();
-
-        if (isa->hasCxxDtor()) {
-            object_cxxDestruct(obj);
-        }
-
-        if (isa->instancesHaveAssociatedObjects()) {
-            _object_remove_assocations(obj);
-        }
-
-        if (!UseGC) objc_clear_deallocating(obj);
-    }
-
-    return obj;
-}
-```
-这里的object_cxxDestruct方法可以查看[ARC下dealloc过程及.cxx_destruct的探究](http://blog.sunnyxx.com/2014/04/02/objc_dig_arc_dealloc/)，最新版本的代码可能不想是文中所写，但是原理还是相同的：用来销毁对象的实例变量，并且调用父类的dealloc。
-
-调用objc_clear_deallocating函数。
-
-```
-void objc_clear_deallocating(id obj) 
-{
-    assert(obj);
-
-    if (obj->isTaggedPointer()) return;
-    obj->clearDeallocating();
-}
-```
-<!--我们顺着`clearDeallocating_slow`->`objc_object::clearDeallocating_slow`->`weak_clear_no_lock`->`weak_entry_remove`->`weak_compact_maybe`->......方法太多，总结起来太费事了（总算知道为什么大家的文章对于weak的释放写的那么语焉不详）。-->
-总结objc_clear_deallocating的作用
-1、从weak表中获取废弃对象的地址为键值的记录
-2、将包含在记录中的所有附有 weak修饰符变量的地址，赋值为nil
-3、将weak表中该记录删除
-4、从引用计数表中删除废弃对象的地址为键值的记录
-
-接下来
-```
-inline void 
-objc_object::clearDeallocating()
-{
-    if (slowpath(!isa.nonpointer)) {
-        // Slow path for raw pointer isa.
-        sidetable_clearDeallocating();
-    }
-    else if (slowpath(isa.weakly_referenced  ||  isa.has_sidetable_rc)) {
-        // Slow path for non-pointer isa with weak refs and/or side table data.
-        clearDeallocating_slow();
-    }
-
-    assert(!sidetable_present());
-}
-```
-我们会发现这是个内联函数，内部有两个方法；这两个方法内部都是用过 **weak_clear_no_lock**来清除弱引用。我们直接来看这个方法:
-
-```
-void 
-weak_clear_no_lock(weak_table_t *weak_table, id referent_id) 
-{
-    objc_object *referent = (objc_object *)referent_id;
-
-    weak_entry_t *entry = weak_entry_for_referent(weak_table, referent);
-    if (entry == nil) {
-        /// XXX shouldn't happen, but does with mismatched CF/objc
-        //printf("XXX no entry for clear deallocating %p\n", referent);
-        return;
-    }
-
-    // zero out references
-    weak_referrer_t *referrers;
-    size_t count;
-
-    if (entry->out_of_line) {
-        referrers = entry->referrers;
-        count = TABLE_SIZE(entry);
-    } 
-    else {
-        referrers = entry->inline_referrers;
-        count = WEAK_INLINE_COUNT;
-    }
-
-    for (size_t i = 0; i < count; ++i) {
-        objc_object **referrer = referrers[i];
-        if (referrer) {
-            if (*referrer == referent) {
-                *referrer = nil;
-            }
-            else if (*referrer) {
-                _objc_inform("__weak variable at %p holds %p instead of %p. "
-                             "This is probably incorrect use of "
-                             "objc_storeWeak() and objc_loadWeak(). "
-                             "Break on objc_weak_error to debug.\n", 
-                             referrer, (void*)*referrer, (void*)referent);
-                objc_weak_error();
-            }
-        }
-    }
-
-    weak_entry_remove(weak_table, entry);
-}
-```
-我们可以看到，这里清楚了对象所有的weak指针并设置为nil，同时从weak表中清楚了对应的 **weak_entry_t**对象。
-
-## autorelease
-在我们使用weak对象的时候，会把weak引用的对象自动加入到自动释放池中。
-
-```
-{
-	id __weak obj1 = obj;
-	NSLog(@"%@", obj1);
-}
-```
-可以转换为
-
-```
-id obj1;
-obj_initWeak(&obj1, obj);
-id tmp = objc_loadWeakRetained(&obj1);
-objc_autorelease(tmp);
-NSLog(@"%@", tmp);
-objc_destory(&obj1);
-```
-我们可以发现，比原有的多出了两个方法
-
-```
-id tmp = objc_loadWeakRetained(&obj1);
-objc_autorelease(tmp);
-```
-**objc_loadWeakRetained**函数会取出__weak修饰的对象并且retain；
-**objc_autorelease**函数会将对象注册到autoreleasepool当中。
-当原对象的引用计数变成0的时候,在一个运行循环内就可以将该对象以及该对象所有的弱引用释放掉了。
-这里也印证了一个问题，在使用weak修饰的对象的时候，如果不想被释放，最好要strong修饰一下。这也是所谓的 **weak-strong dance**而不是淡出的weak的原因。
+另外还有一个曾经遇到的[面试题](https://github.com/BiBoyang/BoyangBlog/blob/master/File/InterviewQue_01%20.md)，里面就有 atomic 的比较简单的用法，可以用来借鉴学习。
 
 # 引用
-《Objective-C高级编程》
+
+[不再安全的 OSSpinLock](https://blog.ibireme.com/2016/01/16/spinlock_is_unsafe_in_ios/)
+
+
+
+
+

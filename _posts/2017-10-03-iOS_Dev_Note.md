@@ -2,14 +2,14 @@
 layout: post
 title: 《Effective Objective-C 2.0编写高质量iOS与OS X代码的52个有效方法》读书小记
 date: 2017-10-03 
-tag: iOS、Book
+tag: book
 ---
 
 
 
-## 第一条：了解Objective-C语言的起源
+## 第一条：了解 Objective-C 语言的起源
 
-Objective-C语言是一门面向对象的语言，与C++、Java等有所相似。然而在语法上，则有许多差别。这个差别产生的原因在于，Objective-C是由Smalltalk演化而来，直接借用了或者说继承了很多后者的思想，使用“消息结构”（messaging stricture）而非“函数调用”（function calling）。这个特性使得Objective-C语言，在运行时才回去查找所要执行的方法。实际上，编译器甚至都不关心接受消息的对象是何种类型。
+Objective-C 语言是一门面向对象的语言，与 C++、Java 等有所相似。然而在语法上，则有许多差别。这个差别产生的原因在于，Objective-C 是由 Smalltalk 演化而来，直接借用了或者说继承了很多后者的思想，使用“消息结构”（messaging stricture）而非“函数调用”（function calling）。这个特性使得Objective-C语言，在运行时才回去查找所要执行的方法。实际上，编译器甚至都不关心接受消息的对象是何种类型。
 
 ##### Smalltalk之父Alan Kay曾经说过
 >   I’m sorry that I long ago coined the term “objects” for this topic because it gets many people to focus on the lesser idea. The big idea is “messaging” – that is what the kernel of Smalltalk/Squeak is all about.
